@@ -186,7 +186,7 @@ void SendProtocol::handle_request_event(const mavlink_message_t &msg) const
 	mavlink_msg_request_event_decode(&msg, &request_event);
 	Event e;
 
-	const uint16_t end_sequence = request_event.last_sequence + 1;
+	uint16_t end_sequence = request_event.last_sequence + 1;
 	uint16_t sequence = request_event.first_sequence;
 
 	const auto send_unavailable = [&](uint16_t unavailable_sequence) {
@@ -200,18 +200,36 @@ void SendProtocol::handle_request_event(const mavlink_message_t &msg) const
 		mavlink_msg_response_event_error_send_struct(_mavlink.get_channel(), &event_error);
 	};
 
-	// The buffer holds at most capacity() events, so only the newest capacity() sequences of a request can still be
-	// available. Answer an older part with a single error naming the oldest available sequence, instead of one
-	// lookup and one reply per sequence (up to 65535 for a wrapped range).
-	const uint16_t requested = end_sequence - sequence;
-	const uint16_t answerable = static_cast<uint16_t>(_buffer.capacity());
+	const uint16_t capacity = static_cast<uint16_t>(_buffer.capacity());
+	const uint16_t newest_end = static_cast<uint16_t>(_buffer.get_latest_sequence() + 1);
+	const auto is_before = [](uint16_t a, uint16_t b) { return (a != b) && (static_cast<uint16_t>(b - a) < 0x8000u); };
 
-	if (requested > answerable) {
-		send_unavailable(sequence);
-		sequence = end_sequence - answerable;
+	// An empty request (first == last + 1) has nothing to answer.
+	if (sequence == end_sequence) {
+		return;
 	}
 
-	for (; sequence != end_sequence; ++sequence) {
+	// Nothing newer than the latest sequence exists: answer that part of the request with one error, for the
+	// first requested sequence that lies beyond the latest one.
+	if (is_before(newest_end, end_sequence)) {
+		send_unavailable(is_before(sequence, newest_end) ? newest_end : sequence);
+		end_sequence = newest_end;
+
+		if (!is_before(sequence, end_sequence)) {
+			// the whole request was beyond the latest sequence: nothing else to answer
+			return;
+		}
+	}
+
+	// The buffer holds at most capacity() events, so only the newest capacity() sequences of what is left can
+	// still be available. Answer the older part with a single error naming the oldest available sequence, instead
+	// of one lookup and one reply per sequence (up to 65535 for a wrapped range).
+	if (static_cast<uint16_t>(end_sequence - sequence) > capacity) {
+		send_unavailable(sequence);
+		sequence = static_cast<uint16_t>(end_sequence - capacity);
+	}
+
+	for (uint16_t n = 0; (sequence != end_sequence) && (n < capacity); ++sequence, ++n) {
 		if (_buffer.get_event(sequence, e)) {
 			PX4_DEBUG("sending requested event %i", sequence);
 			send_event(e);
