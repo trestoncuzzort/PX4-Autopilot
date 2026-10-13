@@ -593,7 +593,14 @@ bool RCTest::sumd32ChannelsTest()
 	ut_compare("decoded", result, 0);
 	ut_compare("channel count", channel_count, channel_count_sent);
 
-	// the decoder reorders the first four channels (sent 1, 2, 0, 3); from channel 5 on they come out in order
+	// the decoder reorders the first four channels: output 0..3 carry the sent channels 1, 2, 0, 3
+	const unsigned first_four[4] = {1, 2, 0, 3};
+
+	for (unsigned i = 0; i < 4; i++) {
+		ut_compare("reordered channel value", channels[i], (12000 + 8 * first_four[i]) >> 3);
+	}
+
+	// from channel 5 on they come out in order
 	for (unsigned i = 4; i < channel_count_sent; i++) {
 		ut_compare("channel value", channels[i], (12000 + 8 * i) >> 3);
 	}
