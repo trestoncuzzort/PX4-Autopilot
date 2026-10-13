@@ -1398,9 +1398,17 @@ UavcanNode::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param::G
 		if (result.isSuccessful()) {
 			uavcan::protocol::param::GetSet::Response resp = result.getResponse();
 
-			if (resp.name.size() && (_count_index < MAX_PARAM_INDEX)) {
+			if (resp.name.size()) {
 				_count_index++;
 				_param_counts[node_id] = _count_index;
+
+				if (_count_index > MAX_PARAM_INDEX) {
+					// the node answered at the last index the protocol has: the count is complete
+					_count_in_progress = false;
+					_count_index = 0;
+					PX4_DEBUG("completed param count for node %hhu: %u", node_id, (unsigned)_param_counts[node_id]);
+					return;
+				}
 
 				uavcan::protocol::param::GetSet::Request req;
 				req.index = _count_index;
