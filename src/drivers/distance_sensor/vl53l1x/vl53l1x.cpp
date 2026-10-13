@@ -494,10 +494,17 @@ int8_t VL53L1X::VL53L1X_SensorInit()
 
 	status |= VL53L1X_StartRanging();
 
-	// wait for the first measurement with a bound: CheckForDataReady() leaves the flag untouched on a
-	// bus error, so a sensor that does not answer or never reports data ready would hang the caller
+	// wait for the first measurement with a bound: CheckForDataReady() leaves the flag untouched when its
+	// status read fails, so a sensor that does not answer or never reports data ready would hang the caller
 	for (unsigned attempt = 0; (tmp == 0) && (attempt < 1000); attempt++) {
 		status = VL53L1X_CheckForDataReady(&tmp);
+
+		if (status != 0) {
+			// the status read failed; every other I2C error in init() fails it too, so give up rather than poll
+			// for the rest of the second
+			return status;
+		}
+
 		px4_usleep(1000);
 	}
 
