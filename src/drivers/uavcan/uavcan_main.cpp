@@ -780,10 +780,11 @@ UavcanNode::Run()
 	if (_actuator_armed_sub.updated()) {
 		actuator_armed_s actuator_armed{};
 		_actuator_armed_sub.copy(&actuator_armed);
-		_armed = actuator_armed.armed || actuator_armed.prearmed;
+		// Commander rejects the storage command while armed (not while only prearmed): match that
+		_armed = actuator_armed.armed;
 
 		if (_servers != nullptr) {
-			_servers->setArmed(_armed);
+			_servers->setArmed(actuator_armed.armed || actuator_armed.prearmed);
 		}
 	}
 
