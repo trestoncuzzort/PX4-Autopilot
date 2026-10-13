@@ -1403,7 +1403,7 @@ UavcanNode::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param::G
 				_param_counts[node_id] = _count_index;
 
 				if (_count_index > MAX_PARAM_INDEX) {
-					// the node answered at the last index the protocol has: the count is complete
+					// the node answered at the last index the protocol can address: the count is capped there
 					_count_in_progress = false;
 					_count_index = 0;
 					PX4_DEBUG("completed param count for node %hhu: %u", node_id, (unsigned)_param_counts[node_id]);

@@ -350,6 +350,8 @@ private:
 	hrt_abstime _last_can_status_pub{0};
 	hrt_abstime _last_node_status_pub{0};
 
+	static constexpr uint16_t MAX_PARAM_INDEX = 8191; ///< uavcan.protocol.param.GetSet index is 13 bits wide
+
 	/*
 	 * The MAVLink parameter bridge needs to know the maximum parameter index
 	 * of each node so that clients can determine when parameter listings have
@@ -361,7 +363,6 @@ private:
 	 *
 	 * The node's UAVCAN ID is used as the index into the _param_counts array.
 	 */
-	static constexpr uint16_t MAX_PARAM_INDEX = 8191; ///< uavcan.protocol.param.GetSet index is 13 bits wide
 	uint16_t _param_counts[128] {};
 	bool _count_in_progress{false};
 	uint16_t _count_index{0};
