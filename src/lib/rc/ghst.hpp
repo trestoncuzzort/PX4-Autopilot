@@ -161,8 +161,8 @@ __EXPORT bool ghst_send_telemetry_gps1_status(int uart_fd, uint32_t latitude, ui
 /**
  * Send secondary GPS information
  * @param uart_fd UART file descriptor
- * @param ground_speed Ground Speed [1 km/h]
- * @param ground_course Ground Course [1e-7 degrees]
+ * @param ground_speed Ground Speed [cm/s]
+ * @param ground_course Ground Course [0.1 degrees, 0..3599]
  * @param num_sats GPS Satellite count
  * @param home_dist Distance to Home [10 m]
  * @param home_dir Direction to Home [1e-7 degrees]
