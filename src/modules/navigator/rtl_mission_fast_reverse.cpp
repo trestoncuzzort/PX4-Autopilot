@@ -156,6 +156,7 @@ void RtlMissionFastReverse::setActiveMissionItems()
 							       reinterpret_cast<uint8_t *>(&next_mission_item), sizeof(mission_item_s), MAX_DATAMAN_LOAD_WAIT);
 
 			if (success) {
+				resolveCurrentPositionItem(next_mission_item);
 				mission_item_to_position_setpoint(next_mission_item, &pos_sp_triplet->next);
 			}
 		}

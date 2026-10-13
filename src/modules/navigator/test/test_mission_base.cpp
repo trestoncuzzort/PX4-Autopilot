@@ -402,7 +402,8 @@ TEST_F(MissionBaseFeasibilityTest, LoiterToAltWithoutCoordinatesLoadsAtTheCurren
 	EXPECT_DOUBLE_EQ(_mission_base.currentItem().lat, global_position.lat);
 	EXPECT_DOUBLE_EQ(_mission_base.currentItem().lon, global_position.lon);
 
-	// The stored item is unchanged, so a mission download returns what was uploaded.
+	// The stored (cache) item is unchanged: the substitution happens when the item is read for flight, not in the
+	// store. This checks the test peer's in-memory store, not a dataman or MAVLink download.
 	mission_item_s stored{};
 	ASSERT_TRUE(_mission_base.loadMissionItemFromCache(0, stored));
 	EXPECT_DOUBLE_EQ(stored.lat, 0.0);
@@ -421,7 +422,7 @@ TEST_F(MissionBaseFeasibilityTest, LoiterToAltWithCoordinatesKeepsThem)
 
 TEST_F(MissionBaseFeasibilityTest, LoiterToAltWithoutCoordinatesPassesTheUploadChecks)
 {
-	// 0,0 is thousands of kilometres from home, beyond MIS_DIST_1WP and outside the inclusion fence,
+	// 0,0 is thousands of kilometres from home and outside the inclusion fence,
 	// but the loiter happens where the vehicle is when the item becomes current.
 	const mission_item_s waypoint = makePositionItem(kBaseLat, kBaseLon, kAlt);
 	EXPECT_TRUE(missionValid({makeLoiterToAlt(0.0, 0.0), waypoint}, 2));
