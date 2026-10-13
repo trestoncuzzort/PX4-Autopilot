@@ -330,3 +330,37 @@ TEST_F(VehicleMagnetometerTest, MagnetometerDisabledFromBootDoesNotDriveRun)
 	EXPECT_EQ(module.selectedIndex(), 0);
 	EXPECT_TRUE(module.callbackRegistered(0));
 }
+
+// One sample that is not a number must not stay in the inconsistency filters: they are complementary filters,
+// and a NaN that gets in would hold the angle and the per-sensor difference at NaN until reboot
+TEST_F(VehicleMagnetometerTest, NonFiniteSampleDoesNotPoisonTheInconsistencyFilters)
+{
+	setPriority(0, 75);
+	setPriority(1, 50);
+	VehicleMagnetometerTestable module;
+
+	// both sensors agree
+	runFor(module, 500_ms, [&]() {
+		publishSample(0, _field);
+		publishSample(1, _field);
+	});
+
+	// one bad sample on the secondary, then agreement again
+	publishSample(1, Vector3f(NAN, NAN, NAN));
+	module.RunPublic();
+	runFor(module, 500_ms, [&]() {
+		publishSample(0, _field);
+		publishSample(1, _field);
+	});
+
+	sensors_status_s status{};
+	ASSERT_TRUE(readStatus(status));
+
+	for (int i = 0; i < 2; i++) {
+		EXPECT_TRUE(PX4_ISFINITE(status.inconsistency[i])) << "sensor " << i;
+	}
+
+	sensor_preflight_mag_s preflight{};
+	ASSERT_TRUE(readPreflight(preflight));
+	EXPECT_TRUE(PX4_ISFINITE(preflight.mag_inconsistency_angle));
+}
