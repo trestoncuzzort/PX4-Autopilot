@@ -219,7 +219,7 @@ TEST_F(GnssRedundancyChecksTest, BelowRequiredSetsGnssLost)
 }
 
 // SYS_HAS_NUM_GNSS above GPS_MAX_INSTANCES (the declared maximum is not enforced) counts as the maximum:
-// two healthy receivers satisfy it, and the per-receiver report stays inside its arrays.
+// two healthy receivers satisfy it.
 TEST_F(GnssRedundancyChecksTest, RequiredCountAboveMaxIsClamped)
 {
 	int required = 3; // one more than the two receivers the check tracks
