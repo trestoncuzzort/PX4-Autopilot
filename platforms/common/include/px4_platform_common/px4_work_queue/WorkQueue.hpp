@@ -71,6 +71,14 @@ public:
 
 	void Run();
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+	// Stop the worker thread running work, so that the time master can run it instead with RunPending().
+	void HandOverToTimeMaster();
+
+	// Run everything queued, on the calling thread, until the queue is empty.
+	void RunPending();
+#endif // ENABLE_LOCKSTEP_SCHEDULER
+
 	// Thread id of the worker that executes Run(). Captured once on the
 	// worker thread itself (WorkQueue is constructed on its own worker).
 	// Used by WorkItem::Deinit to avoid self-wait when called from inside Run().
@@ -120,6 +128,7 @@ private:
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 	int _lockstep_component {-1};
+	px4::atomic_bool _run_by_time_master{false};
 #endif // ENABLE_LOCKSTEP_SCHEDULER
 
 };

@@ -106,6 +106,17 @@ static constexpr wq_config_t test2{"wq:test2", 2000, 0};
 
 } // namespace wq_configurations
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+/** PX4_SIM_WQ_INLINE=1: the time master runs all work items on its own thread. Implies the single work queue. */
+bool WorkQueueInlineRequested();
+
+/** Called once by the time master, before its first time step, to take the work over from the worker thread. */
+bool WorkQueueInlineStart();
+
+/** Called by the time master to run all queued work on its own thread. */
+void WorkQueueInlineRun();
+#endif // ENABLE_LOCKSTEP_SCHEDULER
+
 /**
  * Start the work queue manager task.
  */
