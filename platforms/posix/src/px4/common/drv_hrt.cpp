@@ -91,6 +91,8 @@ __EXPORT uint32_t latency_counters[LATENCY_BUCKET_COUNT + 1];
 static pthread_mutex_t	_hrt_lock;
 static struct work_s	_hrt_work;
 
+static bool _hrt_run_by_time_master{false};
+
 static void hrt_latency_update();
 
 static void hrt_call_reschedule();
@@ -317,6 +319,10 @@ hrt_call_reschedule()
 	/* set the new compare value and remember it for latency tracking */
 	latency_baseline = now + delay;
 
+	if (_hrt_run_by_time_master) {
+		return;
+	}
+
 	// There is no timer ISR, so simulate one by putting an event on the
 	// high priority work queue
 
@@ -535,6 +541,19 @@ int px4_pthread_cond_timedwait(pthread_cond_t *cond,
 {
 	const uint64_t scheduled = ts_to_abstime(ts);
 	return lockstep_scheduler.cond_timedwait(cond, mutex, scheduled);
+}
+
+void px4_lockstep_run_timers()
+{
+	if (!_hrt_run_by_time_master) {
+		// hrt_call_reschedule() reads this under the lock, on whichever thread adds a callout
+		hrt_lock();
+		_hrt_run_by_time_master = true;
+		hrt_unlock();
+		hrt_work_cancel(&_hrt_work);
+	}
+
+	hrt_tim_isr(nullptr);
 }
 
 int px4_lockstep_register_component()

@@ -113,9 +113,36 @@ static const wq_config_t &SelectWorkQueue(const wq_config_t &requested_wq)
 	static constexpr uint16_t SINGLE_QUEUE_STACK_SIZE = 60000; // has to hold the deepest work item of every queue
 	static constexpr wq_config_t single_queue{"wq:single", SINGLE_QUEUE_STACK_SIZE, 0};
 	static const char *const setting = getenv("PX4_SIM_WQ_SINGLE");
-	static const bool use_single_queue = setting != nullptr && strcmp(setting, "1") == 0;
+	static const bool use_single_queue = (setting != nullptr && strcmp(setting, "1") == 0) || WorkQueueInlineRequested();
 
 	return use_single_queue ? single_queue : requested_wq;
+}
+
+static WorkQueue *_inline_wq{nullptr};
+
+bool WorkQueueInlineRequested()
+{
+	static const char *const setting = getenv("PX4_SIM_WQ_INLINE");
+	static const bool requested = setting != nullptr && strcmp(setting, "1") == 0;
+	return requested;
+}
+
+bool WorkQueueInlineStart()
+{
+	// any configuration: SelectWorkQueue maps all of them to the single queue
+	_inline_wq = WorkQueueFindOrCreate(wq_configurations::hp_default);
+
+	if (_inline_wq == nullptr) {
+		return false;
+	}
+
+	_inline_wq->HandOverToTimeMaster();
+	return true;
+}
+
+void WorkQueueInlineRun()
+{
+	_inline_wq->RunPending();
 }
 #endif // ENABLE_LOCKSTEP_SCHEDULER
 
