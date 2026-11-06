@@ -205,7 +205,9 @@ void Sih::lockstep_loop()
 		next_step_wall_time_us = math::max(next_step_wall_time_us + interval_us, pre_compute_wall_time_us - 50'000);
 		const uint64_t current_wall_time_us = micros();
 
-		if (next_step_wall_time_us > current_wall_time_us) {
+		// At high capped speeds a sleep per step costs more than it paces. Wait until a millisecond is owed,
+		// so that steps run in short bursts with the same average speed.
+		if (next_step_wall_time_us >= current_wall_time_us + 1000) {
 			usleep(next_step_wall_time_us - current_wall_time_us);
 		}
 	}
