@@ -47,7 +47,7 @@
 static inline hrt_abstime mavlink_link_time()
 {
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
-	timespec ts{};
+	timespec ts {};
 	system_clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ts_to_abstime(&ts);
 #else
