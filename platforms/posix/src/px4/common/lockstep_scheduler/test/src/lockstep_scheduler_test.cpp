@@ -1,6 +1,8 @@
 #include <lockstep_scheduler/lockstep_scheduler.h>
 #include <gtest/gtest.h>
+#include <mutex>
 #include <thread>
+#include <vector>
 #include <atomic>
 #include <random>
 #include <iostream>
@@ -334,6 +336,205 @@ void test_usleep()
 	EXPECT_EQ(ls.usleep_until(some_time_us + 1000), 0);
 	EXPECT_EQ(step, Step::UsleepTriggered);
 	thread.join(ls);
+}
+
+// Waiters keep their lock and cond on the stack and are woken by time and by another signaler at the same moment.
+// This is the case where the time master has selected a waiter while something else wakes it. Run under ASan or
+// TSan, it catches the time master touching a lock or cond after the waiter has returned and destroyed them.
+TEST(LockstepScheduler, StackWaitsWithCompetingSignaler)
+{
+	LockstepScheduler ls;
+	ls.set_absolute_time(some_time_us);
+
+	struct Slot {
+		std::mutex mutex;
+		pthread_mutex_t *lock{nullptr};
+		pthread_cond_t *cond{nullptr};
+	};
+
+	static constexpr int num_waiters = 8;
+	static constexpr unsigned min_ticks = 20000;
+	Slot slots[num_waiters];
+	std::atomic<bool> stop{false};
+	std::atomic<bool> joined{false};
+	std::atomic<uint64_t> completed{0};
+
+	std::thread ticker([&ls, &joined]() {
+		uint64_t time_us = some_time_us;
+
+		while (!joined) {
+			time_us += 2;
+			ls.set_absolute_time(time_us);
+		}
+	});
+
+	std::thread signaler([&slots, &stop]() {
+		while (!stop) {
+			for (Slot &slot : slots) {
+				std::lock_guard<std::mutex> guard(slot.mutex);
+
+				if (slot.lock) {
+					pthread_mutex_lock(slot.lock);
+					pthread_cond_broadcast(slot.cond);
+					pthread_mutex_unlock(slot.lock);
+				}
+			}
+		}
+	});
+
+	std::vector<std::thread> waiters;
+
+	for (int i = 0; i < num_waiters; ++i) {
+		waiters.emplace_back([&ls, &slots, &stop, &completed, i]() {
+			while (!stop) {
+				pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+				pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+				{
+					std::lock_guard<std::mutex> guard(slots[i].mutex);
+					slots[i].lock = &lock;
+					slots[i].cond = &cond;
+				}
+
+				pthread_mutex_lock(&lock);
+				const int result = ls.cond_timedwait(&cond, &lock, ls.get_absolute_time() + 1 + (i % 3));
+				EXPECT_TRUE(result == 0 || result == ETIMEDOUT);
+				pthread_mutex_unlock(&lock);
+
+				{
+					std::lock_guard<std::mutex> guard(slots[i].mutex);
+					slots[i].lock = nullptr;
+					slots[i].cond = nullptr;
+				}
+
+				pthread_mutex_destroy(&lock);
+				pthread_cond_destroy(&cond);
+				++completed;
+			}
+		});
+	}
+
+	while (completed < min_ticks) {
+		std::this_thread::yield();
+	}
+
+	stop = true;
+	signaler.join();
+
+	// Each waiter's exit waits for the ticker to clear its entry from the scheduler, so time has to keep moving here.
+	for (std::thread &waiter : waiters) {
+		waiter.join();
+	}
+
+	joined = true;
+	ticker.join();
+
+	EXPECT_GE(completed, min_ticks);
+}
+
+// Lets a test see how far set_absolute_time() has got, instead of guessing from a sleep.
+class LockstepSchedulerTestPeer
+{
+public:
+	static int selected_waiters(LockstepScheduler &ls)
+	{
+		std::lock_guard<std::mutex> guard(ls._timed_waits_mutex);
+		int count = 0;
+
+		for (LockstepScheduler::TimedWait *entry = ls._timed_waits; entry != nullptr; entry = entry->next) {
+			if (entry->signal_pending) {
+				++count;
+			}
+		}
+
+		return count;
+	}
+};
+
+// One waiter's lock is held so that the time master stops partway through signaling. A second waiter, selected but not
+// signaled yet, is woken by someone else. It must not return, because the time master still holds pointers to its lock
+// and cond. Entries are signaled in the order they registered, so the first waiter here blocks the second.
+TEST(LockstepScheduler, SelectedWaiterWokenByOtherSignalerWaitsForSignalPhase)
+{
+	LockstepScheduler ls;
+	ls.set_absolute_time(some_time_us);
+	const uint64_t deadline = some_time_us + 1000;
+
+	pthread_mutex_t first_lock = PTHREAD_MUTEX_INITIALIZER;
+	pthread_cond_t first_cond = PTHREAD_COND_INITIALIZER;
+	pthread_mutex_t second_lock = PTHREAD_MUTEX_INITIALIZER;
+	pthread_cond_t second_cond = PTHREAD_COND_INITIALIZER;
+	std::atomic<bool> first_ready{false};
+	std::atomic<bool> second_ready{false};
+	std::atomic<bool> second_returned{false};
+
+	std::thread first([&]() {
+		pthread_mutex_lock(&first_lock);
+		first_ready = true;
+		EXPECT_EQ(ls.cond_timedwait(&first_cond, &first_lock, deadline), ETIMEDOUT);
+		pthread_mutex_unlock(&first_lock);
+	});
+
+	while (!first_ready) { std::this_thread::yield(); }
+
+	// Taking the lock proves the first waiter is inside its wait. Keep holding it to stall the time master there.
+	pthread_mutex_lock(&first_lock);
+
+	std::thread second([&]() {
+		pthread_mutex_lock(&second_lock);
+		second_ready = true;
+		ls.cond_timedwait(&second_cond, &second_lock, deadline);
+		second_returned = true;
+		pthread_mutex_unlock(&second_lock);
+	});
+
+	while (!second_ready) { std::this_thread::yield(); }
+
+	pthread_mutex_lock(&second_lock);
+	pthread_mutex_unlock(&second_lock);
+
+	std::thread time_master([&]() { ls.set_absolute_time(deadline); });
+
+	// Wait until both are selected and the time master is stalled on the first waiter's lock.
+	const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+
+	while (LockstepSchedulerTestPeer::selected_waiters(ls) < 2 && std::chrono::steady_clock::now() < give_up) {
+		std::this_thread::yield();
+	}
+
+	EXPECT_EQ(LockstepSchedulerTestPeer::selected_waiters(ls), 2);
+
+	pthread_mutex_lock(&second_lock);
+	pthread_cond_broadcast(&second_cond);
+	pthread_mutex_unlock(&second_lock);
+
+	// Long enough for a wrongly released waiter to get through. A correct one waits regardless of this time.
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	EXPECT_FALSE(second_returned);
+
+	pthread_mutex_unlock(&first_lock);
+	time_master.join();
+
+	std::atomic<bool> joined{false};
+	std::thread cleaner([&]() {
+		uint64_t time_us = deadline;
+
+		while (!joined) {
+			ls.set_absolute_time(++time_us);
+			std::this_thread::yield();
+		}
+	});
+
+	first.join();
+	second.join();
+	joined = true;
+	cleaner.join();
+
+	EXPECT_TRUE(second_returned);
+	pthread_mutex_destroy(&first_lock);
+	pthread_cond_destroy(&first_cond);
+	pthread_mutex_destroy(&second_lock);
+	pthread_cond_destroy(&second_cond);
 }
 
 TEST(LockstepScheduler, All)
