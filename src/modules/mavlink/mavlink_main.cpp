@@ -2868,7 +2868,10 @@ Mavlink::task_main(int argc, char *argv[])
 
 	while (!should_exit()) {
 		/* main loop */
-		px4_usleep(_main_loop_delay);
+		// In host time: a peer cannot read faster for a simulation running faster, and sleeping in simulated
+		// time would wake this thread on every step. Stream schedules below stay in simulated time, so
+		// messages keep their order and spacing relative to the flight.
+		system_usleep(_main_loop_delay);
 
 		if (!should_transmit()) {
 			check_requested_subscriptions();
