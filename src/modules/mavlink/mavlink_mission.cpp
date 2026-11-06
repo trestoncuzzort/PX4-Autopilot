@@ -42,6 +42,7 @@
 
 #include "mavlink_mission.h"
 #include "mavlink_main.h"
+#include "mavlink_link_time.h"
 #include "mavlink_command_params.hpp"
 
 #include <lib/geo/geo.h>
@@ -332,7 +333,7 @@ void
 MavlinkMissionManager::send_mission_count(uint32_t sysid, uint8_t compid, uint16_t count, MAV_MISSION_TYPE mission_type,
 		uint32_t opaque_id)
 {
-	_time_last_sent = hrt_absolute_time();
+	_time_last_sent = mavlink_link_time();
 
 	mavlink_mission_count_t wpc{};
 
@@ -397,7 +398,7 @@ MavlinkMissionManager::send_mission_item(uint32_t sysid, uint8_t compid, uint16_
 	}
 
 	if (read_success) {
-		_time_last_sent = hrt_absolute_time();
+		_time_last_sent = mavlink_link_time();
 
 		mavlink_mission_item_int_t wp{};
 		format_mavlink_mission_item(&mission_item, &wp);
@@ -466,7 +467,7 @@ void
 MavlinkMissionManager::send_mission_request(uint32_t sysid, uint8_t compid, uint16_t seq)
 {
 	if (seq < current_max_item_count()) {
-		_time_last_sent = hrt_absolute_time();
+		_time_last_sent = mavlink_link_time();
 
 		mavlink_mission_request_int_t wpr{};
 		wpr.target_component = compid;
@@ -585,7 +586,7 @@ MavlinkMissionManager::send()
 
 	/* check for timed-out operations */
 	if (_state != MAVLINK_WPM_STATE_IDLE && (_time_last_recv > 0)
-	    && hrt_elapsed_time(&_time_last_recv) > MAVLINK_MISSION_PROTOCOL_TIMEOUT_DEFAULT) {
+	    && (mavlink_link_time() - _time_last_recv) > MAVLINK_MISSION_PROTOCOL_TIMEOUT_DEFAULT) {
 
 		_mavlink.send_statustext_critical("Mission sync timeout\t");
 		events::send(events::ID("mavlink_mission_sync_timeout"), events::Log::Error,
@@ -599,13 +600,13 @@ MavlinkMissionManager::send()
 		_transfer_in_progress = false;
 
 	} else if (_state == MAVLINK_WPM_STATE_GETLIST && (_time_last_sent > 0)
-		   && hrt_elapsed_time(&_time_last_sent) > MAVLINK_MISSION_RETRY_TIMEOUT_DEFAULT) {
+		   && (mavlink_link_time() - _time_last_sent) > MAVLINK_MISSION_RETRY_TIMEOUT_DEFAULT) {
 
 		// try to request item again after timeout
 		send_mission_request(_transfer_partner_sysid, _transfer_partner_compid, _transfer_seq);
 
 	} else if (_state == MAVLINK_WPM_STATE_SENDLIST && (_time_last_sent > 0)
-		   && hrt_elapsed_time(&_time_last_sent) > MAVLINK_MISSION_RETRY_TIMEOUT_DEFAULT
+		   && (mavlink_link_time() - _time_last_sent) > MAVLINK_MISSION_RETRY_TIMEOUT_DEFAULT
 		   && _transfer_seq == 0) {
 
 		// MISSION_COUNT may have been dropped
@@ -677,7 +678,7 @@ MavlinkMissionManager::handle_mission_ack(const mavlink_message_t *msg)
 		if ((msg->sysid == _transfer_partner_sysid && msg->compid == _transfer_partner_compid)) {
 			if (_state == MAVLINK_WPM_STATE_SENDLIST && _mission_type == wpa.mission_type) {
 
-				_time_last_recv = hrt_absolute_time();
+				_time_last_recv = mavlink_link_time();
 
 				if (wpa.type == MAV_MISSION_ACCEPTED && _transfer_seq == current_item_count()) {
 					PX4_DEBUG("WPM: MISSION_ACK OK all items sent, switch to state IDLE");
@@ -726,7 +727,7 @@ MavlinkMissionManager::handle_mission_set_current(const mavlink_message_t *msg)
 
 	if (targets_mission_manager(msg, wpc.target_system, wpc.target_component)) {
 		if (_state == MAVLINK_WPM_STATE_IDLE) {
-			_time_last_recv = hrt_absolute_time();
+			_time_last_recv = mavlink_link_time();
 
 			if (wpc.seq < _count[MAV_MISSION_TYPE_MISSION]) {
 				update_active_mission(_mission_dataman_id, _count[MAV_MISSION_TYPE_MISSION], wpc.seq, _crc32[MAV_MISSION_TYPE_MISSION]);
@@ -768,7 +769,7 @@ MavlinkMissionManager::handle_mission_request_list(const mavlink_message_t *msg)
 		if ((_state == MAVLINK_WPM_STATE_IDLE) || ((_state == MAVLINK_WPM_STATE_SENDLIST)
 				&& ((uint8_t)_mission_type == wprl.mission_type) && (msg->sysid == _transfer_partner_sysid)
 				&& (msg->compid == _transfer_partner_compid))) {
-			_time_last_recv = hrt_absolute_time();
+			_time_last_recv = mavlink_link_time();
 
 			_state = MAVLINK_WPM_STATE_SENDLIST;
 			_mission_type = (MAV_MISSION_TYPE)wprl.mission_type;
@@ -828,7 +829,7 @@ MavlinkMissionManager::handle_mission_request(const mavlink_message_t *msg)
 					return;
 				}
 
-				_time_last_recv = hrt_absolute_time();
+				_time_last_recv = mavlink_link_time();
 
 				/* _transfer_seq contains sequence of expected request */
 				if (wpr.seq == _transfer_seq && _transfer_seq < _transfer_count) {
@@ -915,7 +916,7 @@ MavlinkMissionManager::handle_mission_count(const mavlink_message_t *msg)
 
 	if (targets_mission_manager(msg, wpc.target_system, wpc.target_component)) {
 		if (_state == MAVLINK_WPM_STATE_IDLE) {
-			_time_last_recv = hrt_absolute_time();
+			_time_last_recv = mavlink_link_time();
 
 			if (_transfer_in_progress) { // Transfer over different mavlink instance. ignore
 				send_mission_ack(msg->sysid, msg->compid, MAV_MISSION_ERROR);
@@ -1009,7 +1010,7 @@ MavlinkMissionManager::handle_mission_count(const mavlink_message_t *msg)
 			_transfer_land_marker = -1;
 
 		} else if (_state == MAVLINK_WPM_STATE_GETLIST) {
-			_time_last_recv = hrt_absolute_time();
+			_time_last_recv = mavlink_link_time();
 
 			if (msg->sysid != _transfer_partner_sysid || msg->compid != _transfer_partner_compid) {
 				PX4_DEBUG("WPM: Request from another partner while receiveing. Ignore");
@@ -1091,7 +1092,7 @@ MavlinkMissionManager::handle_mission_item(const mavlink_message_t *msg)
 			}
 
 			if (_state == MAVLINK_WPM_STATE_GETLIST) {
-				_time_last_recv = hrt_absolute_time();
+				_time_last_recv = mavlink_link_time();
 
 				if (wp.seq != _transfer_seq) {
 					PX4_DEBUG("WPM: MISSION_ITEM ERROR: seq %u was not the expected %u", wp.seq, _transfer_seq);
@@ -1355,7 +1356,7 @@ MavlinkMissionManager::handle_mission_clear_all(const mavlink_message_t *msg)
 
 		if (_state == MAVLINK_WPM_STATE_IDLE) {
 			/* don't touch mission items storage itself, but only items count in mission state */
-			_time_last_recv = hrt_absolute_time();
+			_time_last_recv = mavlink_link_time();
 
 			_mission_type = (MAV_MISSION_TYPE)wpca.mission_type; // this is needed for the returned ack
 			int ret = 0;
