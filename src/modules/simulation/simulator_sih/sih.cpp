@@ -207,14 +207,18 @@ void Sih::lockstep_loop()
 		// (400 us per step). With a deadline the next step's sleep is shorter by whatever this one overslept.
 		// A stall of more than 10 ms is not made up: the deadline restarts from now, so that the stall is not
 		// followed by a burst of steps.
+		//
+		// At high capped speeds a sleep per step costs more than it paces. Wait until a millisecond is owed,
+		// so that steps run in short bursts with the same average speed.
 		constexpr uint64_t max_catch_up_us = 10'000;
+		constexpr uint64_t min_sleep_us = 1000;
 		next_step_wall_time_us += step_wall_interval_us;
 		const uint64_t current_wall_time_us = micros();
 
 		if (current_wall_time_us > next_step_wall_time_us + max_catch_up_us) {
 			next_step_wall_time_us = current_wall_time_us;
 
-		} else if (next_step_wall_time_us > current_wall_time_us) {
+		} else if (next_step_wall_time_us >= current_wall_time_us + min_sleep_us) {
 			usleep(next_step_wall_time_us - current_wall_time_us);
 		}
 	}
