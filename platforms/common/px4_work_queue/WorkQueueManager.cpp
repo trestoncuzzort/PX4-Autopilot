@@ -47,6 +47,7 @@
 #include <lib/mathlib/mathlib.h>
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 using namespace time_literals;
@@ -98,9 +99,35 @@ FindWorkQueueByName(const char *name)
 	return nullptr;
 }
 
-WorkQueue *
-WorkQueueFindOrCreate(const wq_config_t &new_wq)
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+/**
+ * With PX4_SIM_WQ_SINGLE=1, every work item runs on one thread, in the order it was scheduled.
+ *
+ * In lockstep the barrier already keeps simulated time from advancing until the queues are idle, so work rarely
+ * overlaps anyway, and each hand-off between queue threads costs a wake-up. This removes those. It also changes
+ * scheduling relative to flight hardware, where queues preempt each other by priority, and any work item that
+ * blocks now holds up all the others. It is for batch simulation, and off by default.
+ */
+static const wq_config_t &SelectWorkQueue(const wq_config_t &requested_wq)
 {
+	static constexpr uint16_t SINGLE_QUEUE_STACK_SIZE = 60000; // has to hold the deepest work item of every queue
+	static constexpr wq_config_t single_queue{"wq:single", SINGLE_QUEUE_STACK_SIZE, 0};
+	static const char *const setting = getenv("PX4_SIM_WQ_SINGLE");
+	static const bool use_single_queue = setting != nullptr && strcmp(setting, "1") == 0;
+
+	return use_single_queue ? single_queue : requested_wq;
+}
+#endif // ENABLE_LOCKSTEP_SCHEDULER
+
+WorkQueue *
+WorkQueueFindOrCreate(const wq_config_t &requested_wq)
+{
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+	const wq_config_t &new_wq = SelectWorkQueue(requested_wq);
+#else
+	const wq_config_t &new_wq = requested_wq;
+#endif // ENABLE_LOCKSTEP_SCHEDULER
+
 	if (!_wq_manager_running.load()) {
 		PX4_ERR("not running");
 		return nullptr;

@@ -137,6 +137,19 @@ The setting applies only to SIH running as SITL.
 
 SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
 
+#### Single Work Queue
+
+For batch runs where thread wake-ups are expensive, `PX4_SIM_WQ_SINGLE=1` runs every work item on one thread, instead of one thread per work queue:
+
+```sh
+PX4_SIM_WQ_SINGLE=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+This removes the hand-offs between queue threads, so simulated time can pass faster.
+It also runs work one item at a time that a flight controller would run by priority, and a work item that blocks holds up all the others.
+It does not model flight hardware scheduling, so do not use it to evaluate timing.
+The setting applies only to lockstep simulation and is off unless the value is exactly `1`.
+
 #### Set Custom Takeoff Location
 
 The default takeoff location can be set using environment variables:
