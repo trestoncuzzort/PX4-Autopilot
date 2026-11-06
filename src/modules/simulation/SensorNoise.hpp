@@ -53,6 +53,7 @@ enum class NoiseStream : uint32_t {
 	DifferentialPressure = 10,
 	AccelerometerBias = 11,
 	GyroscopeBias = 12,
+	WindTurbulence = 13,
 };
 
 class SensorNoise : public math::GaussianNoise

@@ -259,6 +259,52 @@ protected:
 		EXPECT_FLOAT_EQ(gyro.y, 0.f);
 	}
 
+	void check_wind_turbulence()
+	{
+		param_reset_all();
+		set_param("SIH_WIND_N", 3.f);
+		set_param("SIH_WIND_D", 1.f);
+		set_param("SIH_WIND_TURB", 2.f);
+		set_param("SIH_WIND_TC", 2.f);
+		Sih sih;
+		sih.updateParams();
+		sih._vehicle = Sih::VehicleType::Quadcopter;
+		sih.parameters_updated();
+		constexpr int steps = 200000;
+		double north = 0.0;
+		double down = 0.0;
+		double square = 0.0;
+		double lag = 0.0;
+		double previous = 0.0;
+
+		for (int step = 0; step < steps; ++step) {
+			sih.equations_of_motion(kDt);
+			const matrix::Vector3f wind = sih._v_apparent_N - sih._v_N;
+			north += (double)wind(0);
+			down += (double)wind(2);
+			const double east = (double)wind(1);
+			square += east * east;
+			lag += east * previous;
+			previous = east;
+		}
+
+		// 800 simulated seconds at a 2 s correlation time, so the estimates are good to about 5%.
+		EXPECT_NEAR(north / steps, 3.0, 0.5);
+		EXPECT_NEAR(down / steps, 1.0, 0.5);
+		const double variance = square / steps;
+		EXPECT_NEAR(sqrt(variance), 2.0, 0.4);
+		EXPECT_NEAR(lag / steps / variance, exp(-(double)kDt / 2.0), 0.001);
+
+		// Setting it to zero leaves the steady wind alone.
+		set_param("SIH_WIND_TURB", 0.f);
+		sih.updateParams();
+		sih.equations_of_motion(kDt);
+		const matrix::Vector3f steady = sih._v_apparent_N - sih._v_N;
+		EXPECT_NEAR(steady(0), 3.f, 1e-2f);
+		EXPECT_NEAR(steady(1), 0.f, 1e-2f);
+		EXPECT_NEAR(steady(2), 1.f, 1e-2f);
+	}
+
 private:
 	static void check(const Sih &sih, const Checkpoint &expected, const char *name, int step)
 	{
@@ -398,6 +444,11 @@ TEST_F(SihPhysicsTest, ImuNoiseCanChangeWithoutResettingStreams)
 TEST_F(SihPhysicsTest, ImuBiasHasConfiguredSizeAndCorrelation)
 {
 	check_imu_bias();
+}
+
+TEST_F(SihPhysicsTest, WindTurbulenceHasConfiguredSizeAndCorrelation)
+{
+	check_wind_turbulence();
 }
 
 TEST_F(SihPhysicsTest, QuadcopterInWind)

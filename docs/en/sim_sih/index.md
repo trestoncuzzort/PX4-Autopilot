@@ -219,6 +219,10 @@ A secondary GPS copies the primary GPS noise rather than having its own stream.
 
 SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_N) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
 
+[`SIH_WIND_D`](../advanced_config/parameter_reference.md#SIH_WIND_D) adds a vertical component.
+[`SIH_WIND_TURB`](../advanced_config/parameter_reference.md#SIH_WIND_TURB) adds turbulence with that standard deviation on each axis, and [`SIH_WIND_TC`](../advanced_config/parameter_reference.md#SIH_WIND_TC) sets how quickly it changes.
+It is off by default, and draws from its own random stream.
+
 #### Set Custom Takeoff Location
 
 The default takeoff location can be set using environment variables:

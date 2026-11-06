@@ -403,7 +403,7 @@ void Sih::parameters_updated()
 
 	_T_TAU = _sih_thrust_tau.get();
 
-	_v_wind_N = Vector3f(_sih_wind_n.get(), _sih_wind_e.get(), 0.f);
+	_v_wind_N = Vector3f(_sih_wind_n.get(), _sih_wind_e.get(), _sih_wind_d.get());
 }
 
 void Sih::read_motors(const float dt)
@@ -769,6 +769,13 @@ void Sih::equations_of_motion(const float dt)
 	const Vector3f w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
 	_w_B = constrain(_w_B + w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
 
+	// Turbulence on top of the steady wind: a first-order Gauss-Markov process on each axis.
+	if (_sih_wind_turb.get() > 0.f) {
+		const float decay = expf(-dt / fmaxf(_sih_wind_tc.get(), 0.1f));
+		const float drive = sqrtf(1.f - decay * decay);
+		_wind_turbulence_state = _wind_turbulence_state * decay + _wind_noise.vector(drive, drive, drive);
+	}
+
 	ecefToNed();
 
 	_lpos_ref.project(_lla.latitude_deg(), _lla.longitude_deg(), _lpos(0), _lpos(1));
@@ -785,6 +792,10 @@ void Sih::ecefToNed()
 	// Transform velocity to NED frame
 	_v_N = C_SE * _v_E;
 	_v_apparent_N = _v_N + _v_wind_N;
+
+	if (_sih_wind_turb.get() > 0.f) {
+		_v_apparent_N += _wind_turbulence_state * _sih_wind_turb.get();
+	}
 
 	_q = Quatf(C_SE) * _q_E;
 	_q.normalize();

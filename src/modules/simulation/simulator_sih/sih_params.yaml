@@ -287,6 +287,33 @@ parameters:
       type: float
       default: 0.0
       unit: m/s
+    SIH_WIND_D:
+      description:
+        short: Wind velocity from down direction
+      type: float
+      default: 0.0
+      unit: m/s
+    SIH_WIND_TURB:
+      description:
+        short: Wind turbulence standard deviation
+        long: >-
+          Steady-state standard deviation of turbulence on each axis, a first-order Gauss-Markov process added to the steady wind.
+          Zero removes the turbulence and draws no samples.
+      type: float
+      default: 0.0
+      min: 0.0
+      decimal: 2
+      unit: m/s
+    SIH_WIND_TC:
+      description:
+        short: Wind turbulence correlation time
+        long: >-
+          How long the turbulence takes to change. Smaller values are gustier.
+      type: float
+      default: 2.0
+      min: 0.1
+      decimal: 1
+      unit: s
     SIH_RNGBC_NOISE:
       description:
         short: Ranging beacon measurement noise standard deviation
