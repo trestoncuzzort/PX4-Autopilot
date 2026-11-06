@@ -138,14 +138,24 @@ void WorkQueue::Add(WorkItem *item)
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 
-	if (_lockstep_component == -1) {
+	const bool run_by_time_master = _run_by_time_master.load();
+
+	// The time master runs this work itself before it can advance time, so there is nothing to wait for.
+	if (_lockstep_component == -1 && !run_by_time_master) {
 		_lockstep_component = px4_lockstep_register_component();
 	}
 
-#endif // ENABLE_LOCKSTEP_SCHEDULER
-
 	_q.push(item);
 	work_unlock();
+
+	if (run_by_time_master) {
+		return;
+	}
+
+#else
+	_q.push(item);
+	work_unlock();
+#endif // ENABLE_LOCKSTEP_SCHEDULER
 
 	SignalWorkerThread();
 }
@@ -197,7 +207,13 @@ void WorkQueue::Run()
 		work_lock();
 
 		// process queued work
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+
+		while (!_q.empty() && !_run_by_time_master.load()) {
+#else
+
 		while (!_q.empty()) {
+#endif // ENABLE_LOCKSTEP_SCHEDULER
 			WorkItem *work = _q.pop();
 
 			// Mark as in-flight so ~WorkItem / Deinit on another thread
@@ -229,6 +245,43 @@ void WorkQueue::Run()
 
 	PX4_DEBUG("%s: exiting", _config.name);
 }
+
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+void WorkQueue::HandOverToTimeMaster()
+{
+	_run_by_time_master.store(true);
+	SignalWorkerThread();
+
+	// The worker may be inside a work item right now. Nothing else can start one until the time master does.
+	while (_running_item.load() != nullptr) {
+		system_usleep(50);
+	}
+
+	work_lock();
+	px4_lockstep_unregister_component(_lockstep_component);
+	_lockstep_component = -1;
+	_runner_tid = pthread_self();
+	work_unlock();
+}
+
+void WorkQueue::RunPending()
+{
+	work_lock();
+
+	while (!_q.empty()) {
+		WorkItem *work = _q.pop();
+		_running_item.store(work);
+		work_unlock();
+		work->RunPreamble();
+		work->Run();
+		// Note: after Run() we cannot access work anymore, as it might have been deleted
+		_running_item.store(nullptr);
+		work_lock();
+	}
+
+	work_unlock();
+}
+#endif // ENABLE_LOCKSTEP_SCHEDULER
 
 void WorkQueue::print_status(bool last)
 {

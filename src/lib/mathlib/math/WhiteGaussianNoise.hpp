@@ -42,9 +42,29 @@
 
 #include <matrix/math.hpp>
 #include <stddef.h>
+#include <stdint.h>
 
 namespace math
 {
+
+/** Private, repeatable Gaussian stream. Each instance must have a single owner. */
+class GaussianNoise
+{
+public:
+	explicit GaussianNoise(uint32_t seed, uint32_t stream = 0) { reset(seed, stream); }
+
+	void reset(uint32_t seed, uint32_t stream = 0);
+	float sample();
+	void fill(float *out, size_t n);
+	matrix::Vector3f vector(float stdx, float stdy, float stdz);
+
+private:
+	float uniform();
+
+	uint32_t _state{1};
+	float _spare{0.f};
+	bool _has_spare{false};
+};
 
 /**
  * Fill out[0..n) with independent white Gaussian noise samples with zero mean and unit standard

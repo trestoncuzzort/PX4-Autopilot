@@ -33,3 +33,12 @@ parameters:
       type: float
       default: 0.0
       unit: gauss
+    SIM_MAG_NOISE:
+      description:
+        short: Magnetometer noise scale
+        long: >-
+          Scales the existing per-axis Gaussian noise. Zero removes the additive noise without changing magnetic offsets or failure injection.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3

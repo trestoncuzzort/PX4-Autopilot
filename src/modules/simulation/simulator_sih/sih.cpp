@@ -49,6 +49,11 @@
 #include <drivers/drv_pwm_output.h>         // to get PWM flags
 #include <lib/drivers/device/Device.hpp>
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+#include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
+#endif
+#include <limits.h>
+
 using namespace math;
 using namespace matrix;
 using namespace time_literals;
@@ -58,7 +63,6 @@ ModuleBase::Descriptor Sih::desc{task_spawn, custom_command, print_usage};
 Sih::Sih() :
 	ModuleParams(nullptr)
 {
-	srand(1234); // initialize the random seed once before calling math::generate_wgn()
 }
 
 Sih::~Sih()
@@ -92,12 +96,12 @@ void Sih::run()
 }
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
-// Get current timestamp in microseconds
+// Pacing must use host time, independently of the simulated clock.
 static uint64_t micros()
 {
-	struct timeval t;
-	gettimeofday(&t, nullptr);
-	return t.tv_sec * ((uint64_t)1000000) + t.tv_usec;
+	struct timespec ts;
+	system_clock_gettime(CLOCK_MONOTONIC, &ts);
+	return uint64_t(ts.tv_sec) * 1'000'000 + ts.tv_nsec / 1'000;
 }
 
 void Sih::lockstep_loop()
@@ -116,7 +120,16 @@ void Sih::lockstep_loop()
 	const char *speedup = getenv("PX4_SIM_SPEED_FACTOR");
 
 	if (speedup) {
-		speed_factor = atof(speedup);
+		char *end = nullptr;
+		const float requested = strtof(speedup, &end);
+
+		if (end != speedup && *end == '\0' && PX4_ISFINITE(requested) && requested > 0.f
+		    && (double)roundf(sim_interval_us / requested) <= INT_MAX) {
+			speed_factor = requested;
+
+		} else {
+			PX4_WARN("Invalid PX4_SIM_SPEED_FACTOR '%s', using 1", speedup);
+		}
 	}
 
 	int rt_interval_us = int(roundf(sim_interval_us / speed_factor));
@@ -124,6 +137,15 @@ void Sih::lockstep_loop()
 	PX4_INFO("Simulation loop with %d Hz (%d us sim time interval)", rate, sim_interval_us);
 	PX4_INFO("Simulation with %.1fx speedup. Loop with (%d us wall time interval)", (double)speed_factor, rt_interval_us);
 	uint64_t pre_compute_wall_time_us;
+	uint64_t report_wall_time_us = 0;
+	uint64_t report_simulation_time_us = 0;
+	uint64_t next_step_wall_time_us = 0;
+
+	const bool run_work_inline = px4::WorkQueueInlineRequested() && px4::WorkQueueInlineStart();
+
+	if (run_work_inline) {
+		PX4_INFO("Running timers and work items on the simulator thread");
+	}
 
 	while (!should_exit()) {
 		pre_compute_wall_time_us = micros();
@@ -134,18 +156,23 @@ void Sih::lockstep_loop()
 		abstime_to_ts(&ts, _current_simulation_time_us);
 		px4_clock_settime(CLOCK_MONOTONIC, &ts);
 
+		if (run_work_inline) {
+			px4_lockstep_run_timers();
+		}
+
 		perf_begin(_loop_perf);
 		sensor_step();
 		perf_end(_loop_perf);
 
+		if (run_work_inline) {
+			px4::WorkQueueInlineRun();
+		}
+
 		// Only do lock-step once we received the first actuator output
-		int sleep_time;
-		uint64_t current_wall_time_us;
+		int interval_us = sim_interval_us;
 
 		if (_last_actuator_output_time <= 0) {
 			PX4_DEBUG("SIH starting up - no lockstep yet");
-			current_wall_time_us = micros();
-			sleep_time = math::max(0, sim_interval_us - (int)(current_wall_time_us - pre_compute_wall_time_us));
 
 		} else {
 			// Holding a component of our own keeps the barrier closed until this step's data is out, so
@@ -157,28 +184,32 @@ void Sih::lockstep_loop()
 			px4_lockstep_progress(_lockstep_component);
 			px4_lockstep_wait_for_components();
 
-			// Wait for the control pipeline to produce new actuator outputs.
-			// Without this, under CPU load the controllers may not run between
-			// SIH iterations, causing stale actuator data and sluggish response.
-			uint64_t wait_start_us = micros();
-			constexpr uint64_t actuator_wait_timeout_us = 10'000'000; // 10s wall time
-
-			while (!_actuator_out_sub.updated() && !should_exit()) {
-				if (micros() - wait_start_us > actuator_wait_timeout_us) {
-					PX4_WARN("SIH lockstep: timed out waiting for actuator_outputs_sim");
-					break;
-				}
-
-				usleep(100);
-			}
-
-			current_wall_time_us = micros();
-			sleep_time = math::max(0, rt_interval_us - (int)(current_wall_time_us - pre_compute_wall_time_us));
+			// The barrier drains the work queues triggered by this step. A disabled sensor or
+			// stopped controller may produce no actuator update until simulated time advances.
+			interval_us = rt_interval_us;
 		}
 
-		_achieved_speedup = 0.99f * _achieved_speedup + 0.01f * ((float)sim_interval_us / (float)(
-					    current_wall_time_us - pre_compute_wall_time_us + sleep_time));
-		usleep(sleep_time);
+		// Simulated over host time across a whole half second, so it includes whatever the sleeps really took.
+		if (pre_compute_wall_time_us - report_wall_time_us >= 500'000) {
+			if (report_wall_time_us != 0) {
+				_achieved_speedup = (float)(_current_simulation_time_us - report_simulation_time_us)
+						    / (float)(pre_compute_wall_time_us - report_wall_time_us);
+			}
+
+			report_wall_time_us = pre_compute_wall_time_us;
+			report_simulation_time_us = _current_simulation_time_us;
+		}
+
+		// Aim at an absolute time, so that an oversleep is made up by the steps after it instead of
+		// lost. A long stall is not made up: speed returns to the request rather than racing past it.
+		next_step_wall_time_us = math::max(next_step_wall_time_us + interval_us, pre_compute_wall_time_us - 50'000);
+		const uint64_t current_wall_time_us = micros();
+
+		// At high capped speeds a sleep per step costs more than it paces. Wait until a millisecond is owed,
+		// so that steps run in short bursts with the same average speed.
+		if (next_step_wall_time_us >= current_wall_time_us + 1000) {
+			usleep(next_step_wall_time_us - current_wall_time_us);
+		}
 	}
 
 	px4_lockstep_unregister_component(_lockstep_component);
@@ -372,7 +403,7 @@ void Sih::parameters_updated()
 
 	_T_TAU = _sih_thrust_tau.get();
 
-	_v_wind_N = Vector3f(_sih_wind_n.get(), _sih_wind_e.get(), 0.f);
+	_v_wind_N = Vector3f(_sih_wind_n.get(), _sih_wind_e.get(), _sih_wind_d.get());
 }
 
 void Sih::read_motors(const float dt)
@@ -738,6 +769,13 @@ void Sih::equations_of_motion(const float dt)
 	const Vector3f w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
 	_w_B = constrain(_w_B + w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
 
+	// Turbulence on top of the steady wind: a first-order Gauss-Markov process on each axis.
+	if (_sih_wind_turb.get() > 0.f) {
+		const float decay = expf(-dt / fmaxf(_sih_wind_tc.get(), 0.1f));
+		const float drive = sqrtf(1.f - decay * decay);
+		_wind_turbulence_state = _wind_turbulence_state * decay + _wind_noise.vector(drive, drive, drive);
+	}
+
 	ecefToNed();
 
 	_lpos_ref.project(_lla.latitude_deg(), _lla.longitude_deg(), _lpos(0), _lpos(1));
@@ -755,6 +793,10 @@ void Sih::ecefToNed()
 	_v_N = C_SE * _v_E;
 	_v_apparent_N = _v_N + _v_wind_N;
 
+	if (_sih_wind_turb.get() > 0.f) {
+		_v_apparent_N += _wind_turbulence_state * _sih_wind_turb.get();
+	}
+
 	_q = Quatf(C_SE) * _q_E;
 	_q.normalize();
 }
@@ -771,20 +813,39 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	Vector3f gyro_noise;
 
 	if (false && _T_B.longerThan(FLT_EPSILON)) { // too much noise at least for the low update rate O.O
-		accel_noise = math::noiseGauss3f(0.5f, 1.7f, 1.4f);
-		gyro_noise = math::noiseGauss3f(0.14f, 0.07f, 0.03f);
+		accel_noise = _accel_noise.vector(0.5f, 1.7f, 1.4f) * fmaxf(_sih_acc_noise.get(), 0.f);
+		gyro_noise = _gyro_noise.vector(0.14f, 0.07f, 0.03f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 
 	} else {
 		// Lower noise when not armed
-		accel_noise = math::noiseGauss3f(0.1f, 0.1f, 0.1f);
-		gyro_noise = math::noiseGauss3f(0.01f, 0.01f, 0.01f);
+		accel_noise = _accel_noise.vector(0.1f, 0.1f, 0.1f) * fmaxf(_sih_acc_noise.get(), 0.f);
+		gyro_noise = _gyro_noise.vector(0.01f, 0.01f, 0.01f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 	}
 
+	// First-order Gauss-Markov bias with exact discretisation, so its size does not depend on the step.
+	const float accel_bias_std = fmaxf(_sih_acc_bias.get(), 0.f);
+	const float gyro_bias_std = fmaxf(_sih_gyro_bias.get(), 0.f);
+
+	if ((accel_bias_std > 0.f || gyro_bias_std > 0.f) && (_imu_bias_time_us != 0)) {
+		const float decay = expf(-1e-6f * (float)(time_now_us - _imu_bias_time_us) / fmaxf(_sih_imu_bias_tc.get(), 1.f));
+		const float drive = sqrtf(1.f - decay * decay);
+
+		if (accel_bias_std > 0.f) {
+			_accel_bias_state = _accel_bias_state * decay + _accel_bias_noise.vector(drive, drive, drive);
+		}
+
+		if (gyro_bias_std > 0.f) {
+			_gyro_bias_state = _gyro_bias_state * decay + _gyro_bias_noise.vector(drive, drive, drive);
+		}
+	}
+
+	_imu_bias_time_us = time_now_us;
+
 	Vector3f specific_force_B = R_E2B * _specific_force_E;
-	Vector3f accel = specific_force_B + accel_noise;
+	Vector3f accel = specific_force_B + accel_noise + _accel_bias_state * accel_bias_std;
 
 	const Vector3f earth_spin_rate_B = R_E2B * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE);
-	Vector3f gyro = _w_B + earth_spin_rate_B + gyro_noise;
+	Vector3f gyro = _w_B + earth_spin_rate_B + gyro_noise + _gyro_bias_state * gyro_bias_std;
 
 	// update IMU every iteration
 	if (!_accel_blocked) {
@@ -813,7 +874,7 @@ void Sih::send_airspeed(const hrt_abstime &time_now_us)
 
 	const Vector3f v_apparent_B = _q.rotateVectorInverse(_v_apparent_N);
 	const float v_pitot = (_vehicle == VehicleType::TailsitterVTOL) ? -v_apparent_B(2) : v_apparent_B(0);
-	airspeed.true_airspeed_m_s = fmaxf(0.1f, v_pitot + math::generate_wgn() * 0.2f);
+	airspeed.true_airspeed_m_s = fmaxf(0.1f, v_pitot + _airspeed_noise.sample() * fmaxf(_sih_arsp_noise.get(), 0.f));
 	airspeed.indicated_airspeed_m_s = airspeed.true_airspeed_m_s * sqrtf(_wing_l.get_rho() / RHO);
 	airspeed.confidence = 0.7f;
 	airspeed.timestamp = hrt_absolute_time();
@@ -866,7 +927,7 @@ void Sih::send_ranging_beacon(const hrt_abstime &time_now_us)
 		const double true_range_m = delta_ecef.norm();
 
 		const float noise_std = _sih_ranging_beacon_noise.get();
-		const float noise_m = (noise_std > 0.f) ? math::generate_wgn() * noise_std : 0.f;
+		const float noise_m = _beacon_noise.sample() * fmaxf(noise_std, 0.f);
 		const double measured_range_m = math::max(0.0, true_range_m + static_cast<double>(noise_m));
 
 		ranging_beacon_s msg{};
@@ -1037,7 +1098,11 @@ int Sih::task_spawn(int argc, char *argv[])
 	desc.task_id = px4_task_spawn_cmd("sih",
 					  SCHED_DEFAULT,
 					  SCHED_PRIORITY_MAX,
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+					  px4::WorkQueueInlineRequested() ? 60000 : 1560,
+#else
 					  1560,
+#endif
 					  (px4_main_t)&run_trampoline,
 					  (char *const *)argv);
 

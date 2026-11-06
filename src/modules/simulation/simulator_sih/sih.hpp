@@ -55,7 +55,7 @@
  */
 #pragma once
 
-#include <mathlib/math/WhiteGaussianNoise.hpp>
+#include <modules/simulation/SensorNoise.hpp>
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/module_params.h>
 #include <px4_platform_common/posix.h>
@@ -94,6 +94,8 @@ using namespace time_literals;
 
 class Sih : public ModuleBase, public ModuleParams
 {
+	friend class SihPhysicsTest;
+
 public:
 	static Descriptor desc;
 
@@ -138,6 +140,20 @@ private:
 	uORB::Publication<vehicle_attitude_s>         _attitude_ground_truth_pub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Publication<vehicle_local_position_s>   _local_position_ground_truth_pub{ORB_ID(vehicle_local_position_groundtruth)};
 	uORB::Publication<vehicle_global_position_s>  _global_position_ground_truth_pub{ORB_ID(vehicle_global_position_groundtruth)};
+
+	simulation::SensorNoise _accel_noise{simulation::NoiseStream::Accelerometer};
+	simulation::SensorNoise _gyro_noise{simulation::NoiseStream::Gyroscope};
+	simulation::SensorNoise _airspeed_noise{simulation::NoiseStream::SihAirspeed};
+	simulation::SensorNoise _beacon_noise{simulation::NoiseStream::RangingBeacon};
+	simulation::SensorNoise _accel_bias_noise{simulation::NoiseStream::AccelerometerBias};
+	simulation::SensorNoise _gyro_bias_noise{simulation::NoiseStream::GyroscopeBias};
+
+	// Unit variance, scaled by the parameters when used, so that they can change while running.
+	matrix::Vector3f _accel_bias_state{_accel_bias_noise.vector(1.f, 1.f, 1.f)};
+	matrix::Vector3f _gyro_bias_state{_gyro_bias_noise.vector(1.f, 1.f, 1.f)};
+	uint64_t _imu_bias_time_us{0};
+	simulation::SensorNoise _wind_noise{simulation::NoiseStream::WindTurbulence};
+	matrix::Vector3f _wind_turbulence_state{_wind_noise.vector(1.f, 1.f, 1.f)}; // unit variance
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _actuator_out_sub{ORB_ID(actuator_outputs_sim)};
@@ -316,6 +332,12 @@ private:
 
 	// parameters defined in sih_params.c
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SIH_ACC_NOISE>) _sih_acc_noise,
+		(ParamFloat<px4::params::SIH_GYRO_NOISE>) _sih_gyro_noise,
+		(ParamFloat<px4::params::SIH_ARSP_NOISE>) _sih_arsp_noise,
+		(ParamFloat<px4::params::SIH_ACC_BIAS>) _sih_acc_bias,
+		(ParamFloat<px4::params::SIH_GYRO_BIAS>) _sih_gyro_bias,
+		(ParamFloat<px4::params::SIH_IMU_BIAS_TC>) _sih_imu_bias_tc,
 		(ParamInt<px4::params::IMU_GYRO_RATEMAX>) _imu_gyro_ratemax,
 		(ParamInt<px4::params::IMU_INTEG_RATE>) _imu_integration_rate,
 		(ParamFloat<px4::params::SIH_MASS>) _sih_mass,
@@ -354,6 +376,9 @@ private:
 		(ParamInt<px4::params::SIH_VEHICLE_TYPE>) _sih_vtype,
 		(ParamFloat<px4::params::SIH_WIND_N>) _sih_wind_n,
 		(ParamFloat<px4::params::SIH_WIND_E>) _sih_wind_e,
+		(ParamFloat<px4::params::SIH_WIND_D>) _sih_wind_d,
+		(ParamFloat<px4::params::SIH_WIND_TURB>) _sih_wind_turb,
+		(ParamFloat<px4::params::SIH_WIND_TC>) _sih_wind_tc,
 		(ParamFloat<px4::params::SIH_RNGBC_NOISE>) _sih_ranging_beacon_noise
 	)
 };

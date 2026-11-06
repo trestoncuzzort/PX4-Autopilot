@@ -45,6 +45,8 @@
 
 class LockstepScheduler
 {
+	friend class LockstepSchedulerTestPeer;
+
 public:
 	LockstepScheduler(bool no_cleanup_on_destroy = false) : _components(no_cleanup_on_destroy) {}
 	~LockstepScheduler();
@@ -89,6 +91,7 @@ private:
 		std::atomic<bool> timeout{false};
 		std::atomic<bool> done{false};
 		std::atomic<bool> removed{true};
+		std::atomic<bool> signal_pending{false}; ///< set_absolute_time() has selected this wait and still needs passed_lock and passed_cond
 
 		TimedWait *next{nullptr}; ///< linked list
 		TimedWait *signal_next{nullptr}; ///< temporary list used by set_absolute_time() to signal outside _timed_waits_mutex
@@ -101,6 +104,5 @@ private:
 	TimedWait *_timed_waits{nullptr}; ///< head of linked list
 	std::mutex _timed_waits_mutex;
 	std::mutex
-	_signaling_mutex; ///< held by set_absolute_time() across its signal phase; waiters block on it during the dance to prevent use-after-free of their stack-local passed_lock/passed_cond
-	std::atomic<bool> _setting_time{false}; ///< true if set_absolute_time() is currently being executed
+	_set_time_mutex; ///< serializes the selection and signal phases of set_absolute_time(), so that one call cannot remove an entry another still has selected. Waiters never take it.
 };

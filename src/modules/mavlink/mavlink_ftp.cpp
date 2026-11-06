@@ -47,6 +47,7 @@
 #include <cstring>
 
 #include "mavlink_ftp.h"
+#include "mavlink_link_time.h"
 #include "mavlink_main.h"
 
 using namespace time_literals;
@@ -405,7 +406,7 @@ out:
 
 void MavlinkFTP::_ensure_buffers_exist()
 {
-	_last_work_buffer_access = hrt_absolute_time();
+	_last_work_buffer_access = mavlink_link_time();
 }
 
 /// @brief Sends the specified FTP response message out through mavlink
@@ -1203,7 +1204,7 @@ MavlinkFTP::_copy_file(const char *src_path, const char *dst_path, size_t length
 
 void MavlinkFTP::send()
 {
-	if (_session_open() && (hrt_elapsed_time(&_last_work_buffer_access) > 30_s)) {
+	if (_session_open() && ((mavlink_link_time() - _last_work_buffer_access) > 30_s)) {
 		_close_session();
 		PX4_WARN("Session was closed without activity");
 	}
@@ -1336,7 +1337,7 @@ void MavlinkFTP::send()
 		// Streaming a burst is activity: without this the session is torn down
 		// from under a burst that runs longer than the inactivity timeout, which
 		// on a slow link a single chunk easily does.
-		_last_work_buffer_access = hrt_absolute_time();
+		_last_work_buffer_access = mavlink_link_time();
 	} while (more_data);
 }
 

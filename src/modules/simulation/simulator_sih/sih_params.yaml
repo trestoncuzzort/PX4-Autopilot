@@ -287,6 +287,33 @@ parameters:
       type: float
       default: 0.0
       unit: m/s
+    SIH_WIND_D:
+      description:
+        short: Wind velocity from down direction
+      type: float
+      default: 0.0
+      unit: m/s
+    SIH_WIND_TURB:
+      description:
+        short: Wind turbulence standard deviation
+        long: >-
+          Steady-state standard deviation of turbulence on each axis, a first-order Gauss-Markov process added to the steady wind.
+          Zero removes the turbulence and draws no samples.
+      type: float
+      default: 0.0
+      min: 0.0
+      decimal: 2
+      unit: m/s
+    SIH_WIND_TC:
+      description:
+        short: Wind turbulence correlation time
+        long: >-
+          How long the turbulence takes to change. Smaller values are gustier.
+      type: float
+      default: 2.0
+      min: 0.1
+      decimal: 1
+      unit: s
     SIH_RNGBC_NOISE:
       description:
         short: Ranging beacon measurement noise standard deviation
@@ -381,3 +408,75 @@ parameters:
       default: 6000.0
       min: 0.1
       decimal: 1
+    SIM_NOISE_SEED:
+      description:
+        short: Simulation sensor noise seed
+        long: >-
+          Seeds independent random streams in SIH and the sensor_*_sim modules at startup.
+          Use the same seed to repeat each stream's samples, or different seeds across test runs and vehicles.
+          A repeatable noise stream does not guarantee identical closed-loop flight timing.
+      type: int32
+      default: 1234
+      min: 0
+      max: 2147483647
+      reboot_required: true
+    SIH_ACC_BIAS:
+      description:
+        short: Accelerometer bias standard deviation
+        long: >-
+          Steady-state standard deviation of a slowly drifting bias on each axis, a first-order Gauss-Markov process.
+          Zero removes the bias and draws no samples.
+      type: float
+      default: 0.0
+      min: 0.0
+      decimal: 3
+      unit: m/s^2
+    SIH_GYRO_BIAS:
+      description:
+        short: Gyroscope bias standard deviation
+        long: >-
+          Steady-state standard deviation of a slowly drifting bias on each axis, a first-order Gauss-Markov process.
+          Zero removes the bias and draws no samples.
+      type: float
+      default: 0.0
+      min: 0.0
+      decimal: 4
+      unit: rad/s
+    SIH_IMU_BIAS_TC:
+      description:
+        short: IMU bias correlation time
+        long: >-
+          How long the accelerometer and gyroscope bias take to wander. Larger values drift more slowly.
+      type: float
+      default: 300.0
+      min: 1.0
+      decimal: 1
+      unit: s
+    SIH_ACC_NOISE:
+      description:
+        short: Accelerometer noise scale
+        long: >-
+          Scales the existing per-axis additive Gaussian IMU noise. Zero removes the additive noise.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3
+    SIH_GYRO_NOISE:
+      description:
+        short: Gyroscope noise scale
+        long: >-
+          Scales the existing per-axis additive Gaussian IMU noise. Zero removes the additive noise.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3
+    SIH_ARSP_NOISE:
+      description:
+        short: SIH true airspeed noise standard deviation
+        long: >-
+          Additive Gaussian noise on true airspeed before the minimum airspeed clamp.
+      type: float
+      default: 0.2
+      min: 0.0
+      decimal: 3
+      unit: m/s

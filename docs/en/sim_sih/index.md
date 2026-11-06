@@ -16,7 +16,8 @@ See [PX4 Simulation QuickStart](../simulation/px4_simulation_quickstart.md) for 
 SIH runs as a PX4 module that replaces real sensor and actuator hardware with a simulated physics model.
 It provides simulated IMU, GPS, barometer, magnetometer, and airspeed sensor data via uORB, and reads actuator outputs to update the vehicle state at each timestep.
 
-The simulation runs in lockstep with PX4, ensuring deterministic and reproducible results.
+In SITL, lockstep coordinates simulation time with PX4's work queues.
+Identical closed-loop results also depend on random-number state, external inputs, and scheduling; lockstep alone does not guarantee them.
 It also integrates seamlessly with ROS 2 with no additional configuration (see [ROS 2 Integration](#ros-2-integration) below).
 
 Two modes are supported:
@@ -113,9 +114,114 @@ SIH supports faster-than-realtime simulation via the `PX4_SIM_SPEED_FACTOR` envi
 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 ```
 
+The speed factor is a requested pacing limit.
+Invalid speed factors produce a warning and use normal speed (`1`).
+The achieved rate depends on the host, active modules, and logging load.
+Increasing it does not change the physics timestep or guarantee that the host reaches the requested rate.
+A requested speed below what the host can reach is held to that speed, and the `simulator_sih status` command reports the speed achieved.
+MAVLink clients run in host time, so PX4 counts its mission, FTP and command retry deadlines in host time too.
+Telemetry stream rates stay in simulated time, so at high speed a client receives far more messages per host second, up to one per stream on each pass of the MAVLink main loop.
+
+#### Offboard-Only MAVLink Links
+
+For automated SIH tests that use the API/offboard link, start with:
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+This starts only the API/offboard MAVLink link, using its usual instance-specific ports.
+It skips the separate GCS, camera, gimbal, and Hawkeye display links and their worker threads.
+Logging remains enabled according to `SDLOG_MODE` and `SDLOG_BACKEND`.
+Leave `PX4_SIH_OFFBOARD_ONLY` unset when those additional links are needed.
+The setting applies only to SIH running as SITL.
+
+#### Single Work Queue
+
+For batch runs where thread wake-ups are expensive, `PX4_SIM_WQ_SINGLE=1` runs every work item on one thread, instead of one thread per work queue:
+
+```sh
+PX4_SIM_WQ_SINGLE=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+This removes the hand-offs between queue threads, so simulated time can pass faster.
+It also runs work one item at a time that a flight controller would run by priority, and a work item that blocks holds up all the others.
+It does not model flight hardware scheduling, so do not use it to evaluate timing.
+The setting applies only to lockstep simulation and is off unless the value is exactly `1`.
+
+The two batch settings can be combined:
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+To check this configuration with the [MAVSDK integration tests](../test_and_ci/integration_testing_mavsdk.md):
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 test/mavsdk_tests/mavsdk_test_runner.py test/mavsdk_tests/configs/sih-sitl.json --speed-factor 10 --build-dir build/px4_sitl_sih
+```
+
+The SIH test configuration includes clock-progress checks for repeated accelerometer and gyroscope failures, a stopped rate controller, and failed parameter autosaves.
+
+#### Simulator Thread (Experimental)
+
+`PX4_SIM_WQ_INLINE=1` goes further than the single work queue: the simulator thread runs timers and every work item itself on each step, which removes the thread wake-ups between them.
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_INLINE=1 PX4_SIM_SPEED_FACTOR=100 make px4_sitl_sih sihsim_quadx
+```
+
+The setting implies the single work queue, with the same limits: it does not model flight hardware scheduling, so do not use it to evaluate timing.
+It applies only to SIH running as SITL and is off unless the value is exactly `1`.
+
+#### Running Several Simulations
+
+Run several simulations at once as a normal user, not as root.
+As root every PX4 thread gets real-time scheduling (`SCHED_FIFO`).
+With many instances those threads starve the startup scripts and other programs, startup can take over a minute, and total throughput is lower.
+With a single instance it makes little difference.
+This does not apply in a container without `CAP_SYS_NICE`.
+
+Holding an instance to one CPU slows it down, so leave CPU placement to the operating system.
+Each instance needs about 10 MB of memory, most of it shared with the other instances.
+
+#### Sensor Noise
+
+Each simulated sensor draws from its own random stream, so changing one sensor's noise or sample rate does not change another's.
+These parameters take effect while the simulation is running:
+
+| Parameter                             | Default    | Effect                                                                                   |
+| ------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `SIH_ACC_NOISE`                       | 1.0        | Multiplies the accelerometer noise of 0.1 m/s^2 per axis                                 |
+| `SIH_GYRO_NOISE`                      | 1.0        | Multiplies the gyroscope noise of 0.01 rad/s per axis                                    |
+| `SIH_ACC_BIAS`, `SIH_GYRO_BIAS`       | 0.0        | Standard deviation of a slowly drifting IMU bias, in m/s^2 and rad/s                     |
+| `SIH_IMU_BIAS_TC`                     | 300        | Correlation time of the IMU bias in s                                                    |
+| `SIH_ARSP_NOISE`                      | 0.2        | True airspeed standard deviation in m/s                                                  |
+| `SIH_RNGBC_NOISE`                     | 30.0       | Ranging beacon standard deviation in m                                                   |
+| `SIM_BARO_NOISE`                      | 0.01       | Barometer standard deviation in hPa                                                      |
+| `SIM_MAG_NOISE`                       | 1.0        | Multiplies the magnetometer noise of 0.02, 0.02 and 0.03 gauss                           |
+| `SIM_GPS_P_NOISE`, `SIM_GPS_V_NOISE`  | 1.0        | Multiply the correlated GPS position and velocity noise, keeping its correlation in time |
+| `SIM_AGP_N_H`, `SIM_AGP_N_V`          | 2.0, 0.5   | Auxiliary global position horizontal and vertical standard deviation in m                |
+| `SIM_ARSP_NOISE`                      | 0.01       | Differential pressure standard deviation in hPa                                          |
+
+`SIM_NOISE_SEED` seeds all the streams at startup.
+Give each run and each vehicle its own seed if their noise should be independent:
+
+```sh
+PX4_PARAM_SIM_NOISE_SEED=7 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+A seed repeats the samples of each stream.
+It does not make a whole flight repeatable, since closed-loop timing also depends on the host.
+A secondary GPS copies the primary GPS noise rather than having its own stream.
+
 #### Wind Simulation
 
-SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
+SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_N) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
+
+[`SIH_WIND_D`](../advanced_config/parameter_reference.md#SIH_WIND_D) adds a vertical component.
+[`SIH_WIND_TURB`](../advanced_config/parameter_reference.md#SIH_WIND_TURB) adds turbulence with that standard deviation on each axis, and [`SIH_WIND_TC`](../advanced_config/parameter_reference.md#SIH_WIND_TC) sets how quickly it changes.
+It is off by default, and draws from its own random stream.
 
 #### Set Custom Takeoff Location
 

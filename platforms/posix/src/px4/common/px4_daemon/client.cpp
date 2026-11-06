@@ -39,6 +39,7 @@
  */
 
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
@@ -138,6 +139,21 @@ Client::_listen()
 	// by another byte, we don't output it yet, until we know whether it was
 	// the end of the stream or not.
 	while (true) {
+#if defined(__PX4_DARWIN)
+
+		// macOS occasionally never delivers end of stream after the server's shutdown(): a copy of this
+		// socket pattern with no PX4 in it reproduces that. Once the reply's end marker is here, stop
+		// waiting for it after a moment, or one command hangs the startup script for good.
+		if (n_buffer_used == 2) {
+			pollfd end_of_stream{_fd, POLLIN, 0};
+
+			if (poll(&end_of_stream, 1, 500) == 0) {
+				return buffer[1];
+			}
+		}
+
+#endif
+
 		int n_read = read(_fd, buffer + n_buffer_used, sizeof buffer - n_buffer_used);
 
 		if (n_read < 0) {

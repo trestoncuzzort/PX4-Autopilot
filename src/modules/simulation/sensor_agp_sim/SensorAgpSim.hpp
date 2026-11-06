@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <mathlib/math/WhiteGaussianNoise.hpp>
+#include <modules/simulation/SensorNoise.hpp>
 #include <lib/lat_lon_alt/lat_lon_alt.hpp>
 #include <lib/perf/perf_counter.h>
 #include <px4_platform_common/defines.h>
@@ -81,6 +81,8 @@ private:
 
 	uint64_t _time_last_update{};
 
+	simulation::SensorNoise _noise{simulation::NoiseStream::AuxiliaryPosition};
+
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _vehicle_global_position_sub{ORB_ID(vehicle_global_position_groundtruth)};
 
@@ -89,6 +91,8 @@ private:
 	perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
 
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SIM_AGP_N_H>) _sim_agp_n_h,
+		(ParamFloat<px4::params::SIM_AGP_N_V>) _sim_agp_n_v,
 		(ParamInt<px4::params::SIM_AGP_FAIL>) _param_sim_agp_fail
 	)
 };

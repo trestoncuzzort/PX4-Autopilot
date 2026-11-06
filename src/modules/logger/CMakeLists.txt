@@ -76,3 +76,8 @@ if(BUILD_TESTING)
 endif()
 
 px4_add_unit_gtest(SRC loggerUtilTest.cpp LINKLIBS logger_util_parse)
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	# F_GETPIPE_SZ lets the test hold a real write in progress without production hooks.
+	px4_add_functional_gtest(SRC LogWriterFileTest.cpp EXTRA_SRCS log_writer_file.cpp)
+endif()
