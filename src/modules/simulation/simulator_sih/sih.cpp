@@ -48,6 +48,7 @@
 
 #include <drivers/drv_pwm_output.h>         // to get PWM flags
 #include <lib/drivers/device/Device.hpp>
+#include <limits.h>
 
 using namespace math;
 using namespace matrix;
@@ -116,7 +117,16 @@ void Sih::lockstep_loop()
 	const char *speedup = getenv("PX4_SIM_SPEED_FACTOR");
 
 	if (speedup) {
-		speed_factor = atof(speedup);
+		char *end = nullptr;
+		const float requested = strtof(speedup, &end);
+
+		if (end != speedup && *end == '\0' && PX4_ISFINITE(requested) && requested > 0.f
+		    && (double)roundf(sim_interval_us / requested) <= INT_MAX) {
+			speed_factor = requested;
+
+		} else {
+			PX4_WARN("Invalid PX4_SIM_SPEED_FACTOR '%s', using 1", speedup);
+		}
 	}
 
 	int rt_interval_us = int(roundf(sim_interval_us / speed_factor));
