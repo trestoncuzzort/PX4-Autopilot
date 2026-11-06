@@ -49,6 +49,8 @@ px4_add_module(
 		geo
 	)
 
+px4_add_functional_gtest(SRC SihPhysicsTest.cpp LINKLIBS modules__simulation__simulator_sih lat_lon_alt)
+
 if(PX4_PLATFORM MATCHES "posix")
 	# create targets for sihsim
 	set(models

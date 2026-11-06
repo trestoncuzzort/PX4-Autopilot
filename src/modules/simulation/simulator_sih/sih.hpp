@@ -94,6 +94,8 @@ using namespace time_literals;
 
 class Sih : public ModuleBase, public ModuleParams
 {
+	friend class SihPhysicsTest;
+
 public:
 	static Descriptor desc;
 
