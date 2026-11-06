@@ -422,7 +422,7 @@ void LogWriterFile::run()
 					if (written < 0) {
 						// retry once
 						PX4_ERR("write failed errno:%i (%s), retrying", errno, strerror(errno));
-						px4_usleep(10000); // 10 milliseconds
+						system_usleep(10000); // 10 milliseconds, in host time like the disk it waits for
 						written = buffer.write_to_file(read_ptr, available, call_fsync);
 					}
 
