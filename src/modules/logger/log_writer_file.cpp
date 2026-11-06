@@ -500,6 +500,9 @@ void LogWriterFile::run()
 int LogWriterFile::write_message(LogType type, void *ptr, size_t size, uint64_t dropout_start)
 {
 	if (_need_reliable_transfer) {
+		// The waits below are for the writer thread and the disk, both in host time. Under lockstep, sleeping
+		// in simulated time here can never return: the logger holds the simulator's barrier during this
+		// iteration, so the clock cannot advance until the logger has finished.
 		int ret;
 
 		// if there's a dropout, write it first (because we might split the message)
@@ -507,7 +510,7 @@ int LogWriterFile::write_message(LogType type, void *ptr, size_t size, uint64_t 
 			while ((ret = write(type, ptr, 0, dropout_start)) == -1) {
 				unlock();
 				notify();
-				px4_usleep(3000);
+				system_usleep(3000);
 				lock();
 			}
 		}
@@ -521,7 +524,7 @@ int LogWriterFile::write_message(LogType type, void *ptr, size_t size, uint64_t 
 			while ((ret = write(type, uptr, write_size, 0)) == -1) {
 				unlock();
 				notify();
-				px4_usleep(3000);
+				system_usleep(3000);
 				lock();
 			}
 
