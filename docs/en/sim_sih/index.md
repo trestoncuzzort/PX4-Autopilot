@@ -122,6 +122,8 @@ These parameters take effect while the simulation is running:
 | ------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
 | `SIH_ACC_NOISE`                       | 1.0        | Multiplies the accelerometer noise of 0.1 m/s^2 per axis                                 |
 | `SIH_GYRO_NOISE`                      | 1.0        | Multiplies the gyroscope noise of 0.01 rad/s per axis                                    |
+| `SIH_ACC_BIAS`, `SIH_GYRO_BIAS`       | 0.0        | Standard deviation of a slowly drifting IMU bias, in m/s^2 and rad/s                     |
+| `SIH_IMU_BIAS_TC`                     | 300        | Correlation time of the IMU bias in s                                                    |
 | `SIH_ARSP_NOISE`                      | 0.2        | True airspeed standard deviation in m/s                                                  |
 | `SIH_RNGBC_NOISE`                     | 30.0       | Ranging beacon standard deviation in m                                                   |
 | `SIM_BARO_NOISE`                      | 0.01       | Barometer standard deviation in hPa                                                      |

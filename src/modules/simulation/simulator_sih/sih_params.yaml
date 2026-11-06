@@ -393,6 +393,38 @@ parameters:
       min: 0
       max: 2147483647
       reboot_required: true
+    SIH_ACC_BIAS:
+      description:
+        short: Accelerometer bias standard deviation
+        long: >-
+          Steady-state standard deviation of a slowly drifting bias on each axis, a first-order Gauss-Markov process.
+          Zero removes the bias and draws no samples.
+      type: float
+      default: 0.0
+      min: 0.0
+      decimal: 3
+      unit: m/s^2
+    SIH_GYRO_BIAS:
+      description:
+        short: Gyroscope bias standard deviation
+        long: >-
+          Steady-state standard deviation of a slowly drifting bias on each axis, a first-order Gauss-Markov process.
+          Zero removes the bias and draws no samples.
+      type: float
+      default: 0.0
+      min: 0.0
+      decimal: 4
+      unit: rad/s
+    SIH_IMU_BIAS_TC:
+      description:
+        short: IMU bias correlation time
+        long: >-
+          How long the accelerometer and gyroscope bias take to wander. Larger values drift more slowly.
+      type: float
+      default: 300.0
+      min: 1.0
+      decimal: 1
+      unit: s
     SIH_ACC_NOISE:
       description:
         short: Accelerometer noise scale
