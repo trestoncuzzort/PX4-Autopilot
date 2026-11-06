@@ -156,6 +156,46 @@ protected:
 		printf("}},\n%s: state hash %016" PRIx64 "\n", expected.name, hash);
 	}
 
+	void check_imu_noise_controls()
+	{
+		param_reset_all();
+		const int32_t seed = 587;
+		ASSERT_EQ(param_set_no_notification(param_find("SIM_NOISE_SEED"), &seed), PX4_OK);
+		Sih sih;
+		sih._q_E = matrix::Quatf{};
+		sih._specific_force_E = matrix::Vector3f(1.5f, -2.f, 9.2f);
+		uORB::Subscription accel_sub{ORB_ID(sensor_accel)};
+		uORB::Subscription gyro_sub{ORB_ID(sensor_gyro)};
+		math::GaussianNoise accel_reference(seed, static_cast<uint32_t>(simulation::NoiseStream::Accelerometer));
+		math::GaussianNoise gyro_reference(seed, static_cast<uint32_t>(simulation::NoiseStream::Gyroscope));
+		simulation::SensorNoise barometer{simulation::NoiseStream::Barometer};
+		uint64_t time = 0;
+
+		for (float scale : {1.f, 0.f, 3.f}) {
+			set_param("SIH_ACC_NOISE", scale);
+			set_param("SIH_GYRO_NOISE", scale);
+			sih.updateParams();
+
+			for (int i = 0; i < 100; ++i) {
+				barometer.sample();
+				sih.reconstruct_sensors_signals(time += 4000);
+				sensor_accel_s accel{};
+				sensor_gyro_s gyro{};
+				ASSERT_TRUE(accel_sub.update(&accel));
+				ASSERT_TRUE(gyro_sub.update(&gyro));
+				const auto expected_accel = sih._specific_force_E + accel_reference.vector(0.1f, 0.1f, 0.1f) * scale;
+				const auto expected_gyro = matrix::Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE)
+							   + gyro_reference.vector(0.01f, 0.01f, 0.01f) * scale;
+				EXPECT_FLOAT_EQ(accel.x, expected_accel(0));
+				EXPECT_FLOAT_EQ(accel.y, expected_accel(1));
+				EXPECT_FLOAT_EQ(accel.z, expected_accel(2));
+				EXPECT_FLOAT_EQ(gyro.x, expected_gyro(0));
+				EXPECT_FLOAT_EQ(gyro.y, expected_gyro(1));
+				EXPECT_FLOAT_EQ(gyro.z, expected_gyro(2));
+			}
+		}
+	}
+
 private:
 	static void check(const Sih &sih, const Checkpoint &expected, const char *name, int step)
 	{
@@ -285,6 +325,11 @@ static constexpr Expected kExpected[] = {
 TEST_F(SihPhysicsTest, Quadcopter)
 {
 	run_vehicle(0, [](int step, float * u) { multirotor_inputs(step, u, 4); }, nullptr, 0, kExpected[0]);
+}
+
+TEST_F(SihPhysicsTest, ImuNoiseCanChangeWithoutResettingStreams)
+{
+	check_imu_noise_controls();
 }
 
 TEST_F(SihPhysicsTest, QuadcopterInWind)

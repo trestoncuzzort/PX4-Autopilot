@@ -6,7 +6,7 @@
     [
         {
             "model": "quadx",
-            "test_filter": "sih_lockstep",
+            "test_filter": "sih_lockstep or sih_noise",
             "timeout_min": 1
         },
         {

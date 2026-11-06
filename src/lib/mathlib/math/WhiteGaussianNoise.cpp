@@ -40,6 +40,65 @@
 namespace math
 {
 
+static constexpr uint64_t GAUSSIAN_NOISE_MODULUS = 2147483647; // 2^31 - 1
+
+void GaussianNoise::reset(uint32_t seed, uint32_t stream)
+{
+	// SplitMix64's output function, so that nearby seeds and streams start far apart.
+	// https://prng.di.unimi.it/splitmix64.c (public domain)
+	uint64_t mixed = ((static_cast<uint64_t>(seed) << 32) | stream) + 0x9e3779b97f4a7c15ULL;
+	mixed = (mixed ^ (mixed >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	mixed = (mixed ^ (mixed >> 27)) * 0x94d049bb133111ebULL;
+	mixed ^= mixed >> 31;
+
+	_state = static_cast<uint32_t>(mixed % (GAUSSIAN_NOISE_MODULUS - 1)) + 1; // 1 to modulus - 1
+	_has_spare = false;
+}
+
+float GaussianNoise::uniform()
+{
+	// The sequence of std::minstd_rand, without <random> or a heap allocation to seed it.
+	_state = static_cast<uint32_t>(static_cast<uint64_t>(_state) * 48271 % GAUSSIAN_NOISE_MODULUS);
+	return 2.f * static_cast<float>(_state) / static_cast<float>(GAUSSIAN_NOISE_MODULUS - 1) - 1.f;
+}
+
+float GaussianNoise::sample()
+{
+	if (_has_spare) {
+		_has_spare = false;
+		return _spare;
+	}
+
+	float v1;
+	float v2;
+	float s;
+
+	do {
+		v1 = uniform();
+		v2 = uniform();
+		s = v1 * v1 + v2 * v2;
+	} while (s >= 1.f || s < 1e-8f);
+
+	const float factor = sqrtf(-2.f * logf(s) / s);
+	_spare = v2 * factor;
+	_has_spare = true;
+	return v1 * factor;
+}
+
+void GaussianNoise::fill(float *out, size_t n)
+{
+	for (size_t i = 0; i < n; ++i) {
+		out[i] = sample();
+	}
+}
+
+matrix::Vector3f GaussianNoise::vector(float stdx, float stdy, float stdz)
+{
+	float samples[3];
+	fill(samples, 3);
+	return matrix::Vector3f(samples[0] * stdx, samples[1] * stdy, samples[2] * stdz);
+}
+
 void generate_wgn(float *out, size_t n)
 {
 	// polar Box-Muller: every accepted draw yields two independent samples, so a vector of n

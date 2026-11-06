@@ -90,28 +90,31 @@ void SensorGpsSim::Run()
 
 		// Correlated Markov process position noise (matching GZBridge model)
 		_gps_pos_noise_n = _pos_markov_time * _gps_pos_noise_n +
-				   _pos_random_walk * math::generate_wgn() * _pos_noise_amplitude;
+				   _pos_random_walk * _position_noise.sample() * _pos_noise_amplitude;
 
 		_gps_pos_noise_e = _pos_markov_time * _gps_pos_noise_e +
-				   _pos_random_walk * math::generate_wgn() * _pos_noise_amplitude;
+				   _pos_random_walk * _position_noise.sample() * _pos_noise_amplitude;
 
 		_gps_pos_noise_d = _pos_markov_time * _gps_pos_noise_d +
-				   _pos_random_walk * math::generate_wgn() * _pos_noise_amplitude * 1.5f;
+				   _pos_random_walk * _position_noise.sample() * _pos_noise_amplitude * 1.5f;
 
-		const double latitude = gpos.lat + math::degrees((double)_gps_pos_noise_n / CONSTANTS_RADIUS_OF_EARTH);
-		const double longitude = gpos.lon + math::degrees((double)_gps_pos_noise_e / CONSTANTS_RADIUS_OF_EARTH);
-		const double altitude = (double)(gpos.alt + _gps_pos_noise_d);
+		const float position_noise_scale = fmaxf(_sim_gps_p_noise.get(), 0.f);
+		const float velocity_noise_scale = fmaxf(_sim_gps_v_noise.get(), 0.f);
+
+		const double latitude = gpos.lat + math::degrees((double)(_gps_pos_noise_n * position_noise_scale) / CONSTANTS_RADIUS_OF_EARTH);
+		const double longitude = gpos.lon + math::degrees((double)(_gps_pos_noise_e * position_noise_scale) / CONSTANTS_RADIUS_OF_EARTH);
+		const double altitude = (double)(gpos.alt + _gps_pos_noise_d * position_noise_scale);
 
 		_gps_vel_noise_n = _vel_markov_time * _gps_vel_noise_n +
-				   _vel_noise_density * math::generate_wgn() * _vel_noise_amplitude;
+				   _vel_noise_density * _velocity_noise.sample() * _vel_noise_amplitude;
 
 		_gps_vel_noise_e = _vel_markov_time * _gps_vel_noise_e +
-				   _vel_noise_density * math::generate_wgn() * _vel_noise_amplitude;
+				   _vel_noise_density * _velocity_noise.sample() * _vel_noise_amplitude;
 
 		_gps_vel_noise_d = _vel_markov_time * _gps_vel_noise_d +
-				   _vel_noise_density * math::generate_wgn() * _vel_noise_amplitude * 1.2f;
+				   _vel_noise_density * _velocity_noise.sample() * _vel_noise_amplitude * 1.2f;
 
-		const Vector3f gps_vel = Vector3f{lpos.vx + _gps_vel_noise_n, lpos.vy + _gps_vel_noise_e, lpos.vz + _gps_vel_noise_d};
+		const Vector3f gps_vel = Vector3f{lpos.vx + _gps_vel_noise_n * velocity_noise_scale, lpos.vy + _gps_vel_noise_e * velocity_noise_scale, lpos.vz + _gps_vel_noise_d * velocity_noise_scale};
 
 		// device id
 		device::Device::DeviceId device_id;

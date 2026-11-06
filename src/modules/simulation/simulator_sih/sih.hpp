@@ -55,7 +55,7 @@
  */
 #pragma once
 
-#include <mathlib/math/WhiteGaussianNoise.hpp>
+#include <modules/simulation/SensorNoise.hpp>
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/module_params.h>
 #include <px4_platform_common/posix.h>
@@ -140,6 +140,11 @@ private:
 	uORB::Publication<vehicle_attitude_s>         _attitude_ground_truth_pub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Publication<vehicle_local_position_s>   _local_position_ground_truth_pub{ORB_ID(vehicle_local_position_groundtruth)};
 	uORB::Publication<vehicle_global_position_s>  _global_position_ground_truth_pub{ORB_ID(vehicle_global_position_groundtruth)};
+
+	simulation::SensorNoise _accel_noise{simulation::NoiseStream::Accelerometer};
+	simulation::SensorNoise _gyro_noise{simulation::NoiseStream::Gyroscope};
+	simulation::SensorNoise _airspeed_noise{simulation::NoiseStream::SihAirspeed};
+	simulation::SensorNoise _beacon_noise{simulation::NoiseStream::RangingBeacon};
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _actuator_out_sub{ORB_ID(actuator_outputs_sim)};
@@ -318,6 +323,9 @@ private:
 
 	// parameters defined in sih_params.c
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SIH_ACC_NOISE>) _sih_acc_noise,
+		(ParamFloat<px4::params::SIH_GYRO_NOISE>) _sih_gyro_noise,
+		(ParamFloat<px4::params::SIH_ARSP_NOISE>) _sih_arsp_noise,
 		(ParamInt<px4::params::IMU_GYRO_RATEMAX>) _imu_gyro_ratemax,
 		(ParamInt<px4::params::IMU_INTEG_RATE>) _imu_integration_rate,
 		(ParamFloat<px4::params::SIH_MASS>) _sih_mass,
