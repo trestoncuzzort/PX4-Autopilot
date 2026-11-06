@@ -1,0 +1,4 @@
+after2   requested     0.5: actual    0.50x ( 99.9% of request), SIH reports 0.50
+after2   requested      10: actual   10.00x (100.0% of request), SIH reports 10.00
+after2   requested      40: actual   40.00x (100.0% of request), SIH reports 40.00
+after2   requested  100000: actual   86.46x (  0.1% of request), SIH reports 84.73

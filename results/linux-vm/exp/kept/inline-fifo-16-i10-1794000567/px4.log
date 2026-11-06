@@ -1,0 +1,87 @@
+INFO  [px4] instance: 10
+
+______  __   __    ___ 
+| ___ \ \ \ / /   /   |
+| |_/ /  \ V /   / /| |
+|  __/   /   \  / /_| |
+| |     / /^\ \ \___  |
+\_|     \/   \/     |_/
+
+px4 starting.
+
+INFO  [px4] startup script: /bin/sh etc/init.d-posix/rcS 10
+INFO  [init] found model autostart file as SYS_AUTOSTART=10040
+INFO  [param] selected parameter default file fs/parameters.bson
+INFO  [param] selected parameter backup file fs/parameters_backup.bson
+  SYS_AUTOCONFIG: curr: 0 -> new: 1
+  MAV_SYS_ID: curr: 1 -> new: 11
+  UXRCE_DDS_KEY: curr: 1 -> new: 11
+  SYS_AUTOSTART: curr: 0 -> new: 10040
+COM_DL_LOSS_T set to 1000000
+  COM_DL_LOSS_T: curr: 10 -> new: 1000000
+COM_RC_LOSS_T set to 100000
+  COM_RC_LOSS_T: curr: 0.5000 -> new: 100000.0000
+COM_OF_LOSS_T set to 100000
+  COM_OF_LOSS_T: curr: 1.0000 -> new: 100000.0000
+COM_DISARM_PRFLT set to 1000000
+  COM_DISARM_PRFLT: curr: 10.0000 -> new: 1000000.0000
+  COM_RC_IN_MODE: curr: 1 -> new: 4
+  NAV_RCL_ACT: curr: 2 -> new: 0
+INFO  [dataman] data manager file './fs/dataman' size is 1208528 bytes
+INFO  [init] SIH simulator
+INFO  [simulator_sih] Simulation loop with 250 Hz (4000 us sim time interval)
+INFO  [simulator_sih] Simulation with 100000.0x speedup. Loop with (0 us wall time interval)
+INFO  [simulator_sih] Running timers and work items on the simulator thread
+INFO  [lockstep_scheduler] setting initial absolute time to 4000 us
+INFO  [commander] LED: open /dev/led0 failed (22)
+INFO  [tone_alarm] home set
+INFO  [uxrce_dds_client] init UDP agent IP:127.0.0.1, port:8888
+INFO  [mavlink] mode: Onboard, data rate: 4000000 B/s on udp port 14590 remote port 14549
+ERROR [dataman_client] timeout after 1000 ms!
+ERROR [dataman_client] Failed to get client ID!
+INFO  [commander] [32mReady for takeoff![0m
+ERROR [dataman_client] timeout after 1000 ms!
+ERROR [dataman_client] Failed to get client ID!
+ERROR [dataman_client] timeout after 1000 ms!
+ERROR [dataman_client] Failed to get client ID!
+WARN  [navigator] Safe point cache retry
+INFO  [logger] logger started (mode=all)
+INFO  [px4] Startup script returned successfully
+INFO  [logger] Max log file size: 1024 MiB
+INFO  [logger] Start file log (type: full)
+INFO  [logger] [logger] ./fs/log/2026-11-06/21_27_36.ulg	
+INFO  [logger] Opened full log file: ./fs/log/2026-11-06/21_27_36.ulg
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [mavlink] Event dropped (11, 31)
+WARN  [mavlink] Dropped 5 events (seq=31)
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry
+WARN  [navigator] Safe point cache retry

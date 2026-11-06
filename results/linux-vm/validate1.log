@@ -1,0 +1,35 @@
+21:51:25 tree at 0f263814ca perf(mavlink): sleep on the host clock in the main loop
+21:51:33 built in 8 s
+21:51:33 --- logger freeze test on snap-next1
+snap-next1 run 0: while held dropouts: 2, takeoff command returned True, simulated time 174.452 -> 330.128: advancing
+snap-next1 run 1: while held dropouts: 3, takeoff command returned True, simulated time 170.98 -> 321.748: advancing
+snap-next1 run 2: while held dropouts: 2, takeoff command returned True, simulated time 178.04 -> 337.124: advancing
+snap-next1 run 3: while held dropouts: 2, takeoff command returned True, simulated time 174.356 -> 317.428: advancing
+snap-next1 run 4: while held dropouts: 3, takeoff command returned True, simulated time 178.224 -> 332.152: advancing
+21:52:18 --- pacing, stock then snap-next1
+stock    requested     0.5: actual    0.50x ( 99.8% of request), SIH reports 0.50
+stock    requested       1: actual    1.00x ( 99.8% of request), SIH reports 1.00
+stock    requested       2: actual    1.99x ( 99.5% of request), SIH reports 2.00
+stock    requested       5: actual    4.94x ( 98.7% of request), SIH reports 5.00
+stock    requested      10: actual    9.76x ( 97.6% of request), SIH reports 10.00
+stock    requested      20: actual   19.12x ( 95.6% of request), SIH reports 20.00
+stock    requested      40: actual   33.60x ( 84.0% of request), SIH reports 37.28
+snap-next1 requested     0.5: actual    0.50x (100.1% of request), SIH reports 0.50
+snap-next1 requested       1: actual    1.00x (100.0% of request), SIH reports 1.00
+snap-next1 requested       2: actual    2.00x (100.0% of request), SIH reports 2.00
+snap-next1 requested       5: actual    5.00x (100.0% of request), SIH reports 5.00
+snap-next1 requested      10: actual   10.00x (100.0% of request), SIH reports 10.00
+snap-next1 requested      20: actual   20.00x (100.0% of request), SIH reports 20.00
+snap-next1 requested      40: actual   40.00x (100.0% of request), SIH reports 40.00
+21:54:01 --- mission abort time, stock then snap-next1
+stock    requested     0.5: achieved 0.5, retries 0 in 8 s, median interval None s, abort at None s 
+stock    requested       1: achieved 1.0, retries 0 in 8 s, median interval None s, abort at 5.03 s 
+stock    requested      10: achieved 10.0, retries 0 in 8 s, median interval None s, abort at 0.52 s 
+stock    requested     100: achieved 39.64, retries 0 in 8 s, median interval None s, abort at 0.15 s 
+stock    requested  100000: achieved 39.16, retries 0 in 8 s, median interval None s, abort at 0.15 s 
+snap-next1 requested     0.5: achieved 0.5, retries 0 in 8 s, median interval None s, abort at 5.01 s 
+snap-next1 requested       1: achieved 1.0, retries 0 in 8 s, median interval None s, abort at 5.01 s 
+snap-next1 requested      10: achieved 10.0, retries 0 in 8 s, median interval None s, abort at 5.01 s 
+snap-next1 requested     100: achieved 53.56, retries 0 in 8 s, median interval None s, abort at 5.0 s 
+snap-next1 requested  100000: achieved 58.14, retries 0 in 8 s, median interval None s, abort at 5.0 s 
+21:55:30 VALIDATE DONE

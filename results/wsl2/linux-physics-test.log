@@ -1,0 +1,71 @@
+ERROR [px4_work_queue] not running
+ERROR [px4_work_queue] wq:lp_default not available
+ERROR [px4_work_queue] init failed
+[==========] Running 7 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 7 tests from SihPhysicsTest
+[ RUN      ] SihPhysicsTest.Quadcopter
+{"quadcopter", {
+	{{-2.175254f, 2.891836f, -5.456390f}, {-2.402942f, 3.019440f, -3.108382f}, {-0.964292f, -0.214657f, -0.154512f, -0.013748f}, {-0.967647f, 0.578976f, -0.085849f}},
+	{{-13.981890f, 14.426308f, -10.752960f}, {-2.940793f, 2.736816f, -0.170714f}, {-0.951118f, -0.256832f, -0.171355f, 0.007076f}, {0.633445f, 0.052025f, 0.032035f}},
+	{{-18.704309f, 18.719128f, 0.037140f}, {-0.000000f, 0.000003f, 0.000000f}, {-0.742712f, -0.631682f, 0.205533f, 0.084345f}, {0.065837f, -0.033259f, -0.005685f}},
+}},
+quadcopter: state hash e88300c0e9b4bf85
+[       OK ] SihPhysicsTest.Quadcopter (1 ms)
+[ RUN      ] SihPhysicsTest.QuadcopterInWind
+{"quadcopter_wind", {
+	{{-7.970062f, 7.224055f, -5.456604f}, {-6.024234f, 5.734948f, -3.108591f}, {-0.964292f, -0.214657f, -0.154511f, -0.013748f}, {-0.967647f, 0.578976f, -0.085849f}},
+	{{-35.407539f, 30.443222f, -10.754333f}, {-6.934209f, 5.731194f, -0.171028f}, {-0.951118f, -0.256831f, -0.171354f, 0.007075f}, {0.633445f, 0.052025f, 0.032035f}},
+	{{-50.709064f, 42.644272f, 0.034943f}, {-0.000001f, 0.000001f, -0.000001f}, {-0.742712f, -0.631681f, 0.205534f, 0.084341f}, {0.065837f, -0.033259f, -0.005685f}},
+}},
+quadcopter_wind: state hash bf66262ac7db1c10
+[       OK ] SihPhysicsTest.QuadcopterInWind (1 ms)
+[ RUN      ] SihPhysicsTest.Hexacopter
+{"hexacopter", {
+	{{0.778170f, -2.079224f, -6.546844f}, {0.611632f, -2.073074f, -4.197711f}, {-0.992552f, 0.114596f, 0.040907f, -0.005845f}, {0.031611f, -0.128125f, 0.013492f}},
+	{{2.876920f, -10.401725f, -11.243408f}, {0.324055f, -1.995034f, 0.786792f}, {-0.992672f, 0.118233f, 0.023948f, -0.007021f}, {0.049272f, -0.010342f, 0.012031f}},
+	{{3.342214f, -13.292697f, 0.045624f}, {-0.000000f, 0.000003f, -0.000000f}, {-0.988253f, 0.146514f, 0.043256f, 0.004227f}, {-0.004196f, -0.003010f, -0.001604f}},
+}},
+hexacopter: state hash c0c527025c755feb
+[       OK ] SihPhysicsTest.Hexacopter (1 ms)
+[ RUN      ] SihPhysicsTest.FixedWing
+INFO  [simulator_sih] SIH_F_CT0 > 0, using propeller dynamic model, overriding SIH_F_T_MAX
+INFO  [simulator_sih] SIH_F_CP0 > 0, using propeller dynamic model, overriding SIH_F_Q_MAX
+{"fixed_wing", {
+	{{8.815239f, 23.912659f, -0.484131f}, {-14.731472f, 7.492058f, -1.127548f}, {-0.177649f, -0.155792f, -0.685076f, -0.689087f}, {2.595141f, 1.291491f, 0.760664f}},
+	{{-37.054550f, -11.606952f, 0.006134f}, {-12.941019f, -10.806494f, 0.003562f}, {-0.112214f, 0.354724f, -0.896749f, 0.239626f}, {-1.561391f, 0.009276f, 0.214194f}},
+	{{-59.475677f, -8.008034f, 0.019043f}, {-0.656906f, 1.233592f, 0.003154f}, {0.249112f, -0.435826f, -0.733819f, 0.457721f}, {0.029097f, 0.026621f, 0.040018f}},
+}},
+fixed_wing: state hash 24c62b063cc612e4
+[       OK ] SihPhysicsTest.FixedWing (3 ms)
+[ RUN      ] SihPhysicsTest.Tailsitter
+{"tailsitter", {
+	{{-3.179385f, -2.421206f, -3.522491f}, {-3.347738f, -2.661762f, -1.718002f}, {-0.828616f, 0.212591f, -0.106165f, 0.506882f}, {-1.069764f, 0.988124f, -2.810278f}},
+	{{-17.679466f, -10.748311f, 0.292206f}, {0.000002f, -0.000002f, 0.000002f}, {-0.648464f, 0.264639f, -0.514168f, 0.495067f}, {-0.235401f, -0.213758f, 2.901878f}},
+	{{-17.679461f, -10.748317f, 0.292236f}, {0.000002f, -0.000002f, 0.000002f}, {-0.581922f, 0.284340f, -0.465183f, 0.603425f}, {0.000000f, 0.000000f, -0.000000f}},
+}},
+tailsitter: state hash 00ab022cbf249f94
+[       OK ] SihPhysicsTest.Tailsitter (4 ms)
+[ RUN      ] SihPhysicsTest.StandardVtol
+INFO  [simulator_sih] SIH_F_CT0 > 0, using propeller dynamic model, overriding SIH_F_T_MAX
+INFO  [simulator_sih] SIH_F_CP0 > 0, using propeller dynamic model, overriding SIH_F_Q_MAX
+{"standard_vtol", {
+	{{-7.134977f, 3.701985f, 3.268494f}, {4.678367f, -12.270722f, 6.474711f}, {0.801858f, 0.083868f, -0.352323f, -0.475245f}, {1.391233f, 1.930677f, 0.380240f}},
+	{{15.198898f, 0.198418f, 0.491028f}, {6.333945f, -4.308097f, -6.763216f}, {-0.906235f, 0.125423f, -0.358021f, 0.186622f}, {-1.251527f, 1.057112f, -0.266612f}},
+	{{13.129126f, -4.046577f, 0.029510f}, {-0.000001f, 0.000002f, -0.000001f}, {0.367315f, 0.504061f, -0.270386f, 0.733412f}, {0.002701f, 0.000000f, -0.000023f}},
+}},
+standard_vtol: state hash aef737dd0b087e67
+[       OK ] SihPhysicsTest.StandardVtol (3 ms)
+[ RUN      ] SihPhysicsTest.RoverAckermann
+{"rover", {
+	{{3.646120f, 2.419154f, 0.000153f}, {1.941173f, 0.933891f, -0.000034f}, {-0.975234f, 0.000000f, -0.000001f, -0.221177f}, {0.000000f, 0.000000f, -0.982500f}},
+	{{11.064505f, 5.134803f, 0.000153f}, {2.028617f, -0.114823f, 0.000003f}, {-0.999633f, 0.000001f, -0.000002f, 0.027093f}, {0.000000f, 0.000000f, 0.188316f}},
+	{{12.661573f, 5.499781f, 0.000061f}, {0.000447f, 0.000330f, -0.000035f}, {-0.958124f, 0.000000f, -0.000003f, -0.286353f}, {0.000000f, 0.000000f, 0.000000f}},
+}},
+rover: state hash b7cb82c85750a646
+[       OK ] SihPhysicsTest.RoverAckermann (1 ms)
+[----------] 7 tests from SihPhysicsTest (16 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 1 test suite ran. (16 ms total)
+[  PASSED  ] 7 tests.

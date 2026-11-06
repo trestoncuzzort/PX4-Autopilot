@@ -1,0 +1,45 @@
+﻿SIH latency validation - published to the fork
+
+Target: trestoncuzzort/PX4-Autopilot, feat/sih-conditions. Published tip: 9852c2cf1da7b7bdb199b357695a8ec516fa03e8.
+Base: upstream 95a0c23482329183d932ac99da00faa7e8d63143.
+Scope: clock liveness and host overhead, followed by noise randomization in a later increment.
+
+Measured on 2026-11-06, AMD Ryzen 9 7900X, Windows/WSL2 Ubuntu 24.04, GCC 13.3. The Windows host remained memory constrained; competing research and cache trimming were paused during timing. These are measurements on this host, not general speed guarantees.
+
+Four rotated square-return flights per mode, requested speed 100x:
+  Stock:               median RTF 13.37x, range 12.46-13.56x.
+  Default candidate:   median RTF 14.40x, range 14.35-14.81x.
+  Offboard-only links: median RTF 17.77x, range 17.60-17.99x.
+  Single work queue:   median RTF 23.30x, range 22.94-24.01x.
+  Both options:        median RTF 30.82x, range 29.38-32.33x.
+
+Both options gave 2.30 times stock flight throughput. Median whole-run time fell from 9.48 to 5.52 seconds; context switches fell 65.5%, system CPU time 64.9%. CPU and context-switch totals include startup and the test runner. Flight RTF uses simulated arm-to-disarm duration divided by its wall-clock duration.
+
+All 20 timing flights passed. All 20 ULogs had zero write dropouts and uninterrupted sensor_combined timestamps exactly 4,000 us apart. Recorded angular-velocity, torque-setpoint and actuator-motor timestamp_sample ages were zero simulation microseconds in every mode. Other logged topics had generation gaps in every mode; this is not a claim that all logged topics are lossless.
+
+Completed checks:
+- 75/75 SIH integration cases with the new logger/barrier/no-actuator-poll/autosave changes and the previous timer implementation, normal queues.
+- 120 alternating accelerometer/gyroscope failure-and-recovery cycles across EKF2 and ATT.
+- Four component barrier tests, including an old-code negative control that fails.
+- Three Linux scheduler tests, including a competing signaler and stack-local wait lifetime checks.
+- Seven fixed-input physics scenarios, including wind; stock and candidate full-trajectory hashes match exactly when compared with the same compiler on Linux, and Claude reports the same on macOS.
+- Physics tolerances also pass across Linux x86-64 and macOS arm64. Mutation controls on macOS catch +0.05% velocity integration and +0.01% gravity changes.
+- Strict mypy, repository flake8 settings, and astyle for changed files.
+
+Final combined suite: 75/75 PASS with both batch options at requested 10x. All 14 focused functional tests pass, including the tighter physics tolerances. After adding the speed guard, all 15 startup input cases and a normal square-return flight passed. Commit cleanup preserved the tested tree exactly.
+
+Replay caveat:
+Three repeats with the final synchronization code each preserved all 22,687 input IMU records, the expected estimator/attitude counts, and final timestamps, with no gaps or write dropouts. Two of three matched stock repeats were complete; one had write dropouts and lost a tail during forced shutdown. An earlier candidate run lost a 23-sample tail despite a normal log-close message; its cause is not proved. A pre-existing stale-buffer-count race in log_writer_file.cpp was reviewed by both agents and remains outside this SIH increment. Reliable shutdown logging needs a focused follow-up test and fix.
+
+Build coverage:
+Linux SIH build and functional tests pass. Claude reports a macOS non-lockstep build pass, with Zenoh disabled locally for an upstream macOS build issue. No NuttX hardware target was built. Claude also ran standalone scheduler tests under macOS ASAN and TSAN with thin platform stubs; this is not Linux sanitizer coverage.
+
+Runtime limits:
+Single-queue mode serializes work differently from flight hardware and is for batch simulation. It must not be used to validate hardware task timing. External clients use wall time while mission-transfer timeouts use simulation time; very high factors can cause upload timeouts. Physics hashes cover fixed-input dynamics, not bitwise-identical closed-loop flight. Shared libc random state and external input timing remain relevant to the noise phase.
+
+Artifacts:
+  WSL /srv/pr-work/sih-final-comparison: per-run ULogs, usage, metrics and summary.
+  WSL /srv/pr-work/sih-baseline: fault, replay, and flight logs.
+  WSL /srv/pr-work/sih-final-suite.log: combined suite output.
+  This channel's timing-summary.json and timing-runner.py: compact results and reproduction script.
+

@@ -1,0 +1,50 @@
+0214c38b11 feat(sih): add a slowly drifting IMU bias
+built snap-next4
+next4    requested       1: actual    1.00x (100.0% of request), SIH reports 1.00
+next4    requested       5: actual    5.00x (100.0% of request), SIH reports 5.01
+next4    requested      10: actual   10.00x (100.0% of request), SIH reports 10.01
+next4    requested      20: actual   19.88x ( 99.4% of request), SIH reports 19.97
+next4    requested      40: actual   39.99x (100.0% of request), SIH reports 39.98
+g10-before speed 10 run 0 exit 0 flight 8.395 elapsed 11.36 user 5.42 sys 7.78 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+g10-after speed 10 run 0 exit 0 flight 8.374 elapsed 11.36 user 5.40 sys 7.45 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+g10-before speed 10 run 1 exit 0 flight 8.395 elapsed 11.39 user 5.40 sys 7.69 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+g10-after speed 10 run 1 exit 0 flight 8.426 elapsed 11.44 user 5.40 sys 7.51 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+g10-before speed 10 run 2 exit 0 flight 8.393 elapsed 11.38 user 5.41 sys 7.69 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+g10-after speed 10 run 2 exit 0 flight 8.404 elapsed 11.23 user 5.33 sys 7.28 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+--- bias switched on, default noise, a square mission
+gbias speed 10 run 0 exit 0 flight 8.624 elapsed 11.51 user 4.69 sys 3.64 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+applied spin
+built snap-spin
+s-batch speed 1000 run 0 exit 0 flight 0.501 elapsed 3.32 user 2.05 sys 1.34 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch20 speed 1000 run 0 exit 0 flight 0.838 elapsed 3.42 user 3.62 sys 1.75 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch100 speed 1000 run 0 exit 1 flight none elapsed 2.58 user 2.49 sys 0.94 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: FAIL
+s-default speed 1000 run 0 exit 0 flight 1.165 elapsed 3.93 user 2.45 sys 2.68 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default20 speed 1000 run 0 exit 0 flight 1.672 elapsed 4.76 user 6.42 sys 3.16 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch speed 1000 run 1 exit 0 flight 0.757 elapsed 3.38 user 2.29 sys 1.58 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch20 speed 1000 run 1 exit 1 flight none elapsed 2.73 user 2.36 sys 0.95 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: FAIL
+s-batch100 speed 1000 run 1 exit 0 flight 0.887 elapsed 3.56 user 4.01 sys 1.75 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default speed 1000 run 1 exit 0 flight 1.095 elapsed 3.81 user 2.44 sys 2.32 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default20 speed 1000 run 1 exit 0 flight 1.722 elapsed 4.62 user 6.42 sys 3.31 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch speed 1000 run 2 exit 0 flight 0.696 elapsed 3.31 user 2.25 sys 1.55 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch20 speed 1000 run 2 exit 0 flight 1.001 elapsed 3.78 user 3.85 sys 2.07 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch100 speed 1000 run 2 exit 0 flight 0.873 elapsed 3.58 user 4.12 sys 1.83 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default speed 1000 run 2 exit 0 flight 1.101 elapsed 3.97 user 2.53 sys 2.51 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default20 speed 1000 run 2 exit 0 flight 1.693 elapsed 4.52 user 6.26 sys 3.23 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch speed 1000 run 3 exit 0 flight 0.652 elapsed 3.38 user 2.32 sys 1.56 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch20 speed 1000 run 3 exit 0 flight 0.890 elapsed 3.53 user 3.70 sys 1.78 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch100 speed 1000 run 3 exit 0 flight 0.871 elapsed 3.56 user 4.12 sys 1.79 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default speed 1000 run 3 exit 0 flight 1.096 elapsed 3.93 user 2.50 sys 2.42 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default20 speed 1000 run 3 exit 0 flight 1.696 elapsed 4.53 user 6.28 sys 3.26 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch speed 1000 run 4 exit 0 flight 0.679 elapsed 3.37 user 2.31 sys 1.58 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch20 speed 1000 run 4 exit 0 flight 0.877 elapsed 3.53 user 3.69 sys 1.79 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-batch100 speed 1000 run 4 exit 0 flight 0.869 elapsed 3.58 user 4.14 sys 1.82 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default speed 1000 run 4 exit 0 flight 1.100 elapsed 3.96 user 2.52 sys 2.46 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+s-default20 speed 1000 run 4 exit 0 flight 1.714 elapsed 4.55 user 6.29 sys 3.21 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+SPIN FLIGHTS DONE
+[0;31m[  FAILED  ] [mSihPhysicsTest.ImuBiasHasConfiguredSizeAndCorrelation
+ 1 FAILED TEST
+0% tests passed, 1 tests failed out of 1
+The following tests FAILED:
+FAILED: [code=8] test/CMakeFiles/test_results /Users/t/sih-work/px4/build/px4_sitl_test/test/CMakeFiles/test_results 
+GTEST DONE
+MAC NEXT4 DONE

@@ -1,0 +1,30 @@
+stock   n= 1: each   38.5x (min   38.5) total    38.5x,  2.15 CPUs, 10 MB each, 0 failed []
+both    n= 1: each   66.7x (min   66.7) total    66.7x,  1.49 CPUs, 10 MB each, 0 failed []
+inline  n= 1: each   96.9x (min   96.9) total    96.9x,  1.62 CPUs, 10 MB each, 0 failed []
+stock   n= 4: each   21.6x (min   21.2) total    86.4x, 10.06 CPUs, 10 MB each, 0 failed []
+both    n= 4: each   47.6x (min   45.3) total   190.5x,  6.86 CPUs, 10 MB each, 0 failed []
+inline  n= 4: each   72.4x (min   64.5) total   289.8x,  6.90 CPUs, 10 MB each, 0 failed []
+stock   n= 8: each   11.3x (min   10.9) total    90.3x, 15.90 CPUs, 10 MB each, 0 failed []
+both    n= 8: each   24.7x (min   24.0) total   197.6x, 13.82 CPUs, 10 MB each, 0 failed []
+inline  n= 8: each   38.8x (min   36.8) total   310.7x, 14.33 CPUs, 10 MB each, 0 failed []
+stock   n=16: each   11.1x (min   10.4) total   178.4x, 15.96 CPUs, 10 MB each, 3 failed ['12: not ready', '14: not ready']
+Traceback (most recent call last):
+  File "/root/sih/parallel.py", line 118, in <module>
+    result = run(name, build, env, count)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/sih/parallel.py", line 78, in run
+    client(build, instance, root, "px4-commander", "takeoff")
+  File "/root/sih/parallel.py", line 41, in client
+    return subprocess.run([str(binary), "--instance", str(instance), *args[1:]], cwd=root, capture_output=True, text=True, timeout=30).stdout
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1209, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 2116, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+  File "/usr/lib/python3.12/subprocess.py", line 1253, in _check_timeout
+    raise TimeoutExpired(
+subprocess.TimeoutExpired: Command '['/root/sih/px4/build/snap-cand/bin/px4-commander', '--instance', '13', 'takeoff']' timed out after 30 seconds

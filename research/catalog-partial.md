@@ -1,0 +1,3909 @@
+# SIH prior-art sweep: partial catalog
+
+Stopped by the owner before the deep-read and verify stages, so nothing here has been adversarially checked. 781 candidates from 51 finished agents, highest relevance first.
+
+- **Aeron / Agrona IdleStrategy family (BackoffIdleStrategy, BusySpin, Yielding, Sleeping, NoOp, Controllable)** (rel 5, library, Apache-2.0) https://github.com/real-logic/agrona
+  - bottlenecks: P1, P2, P3
+  - Canonical idle-strategy abstraction: caller reports workCount, strategy escalates spin -> yield -> exponential park and resets on work. Agrona defaults: 10 spins, 5 yields, park 1 us to 1 ms. Gives SIH a pluggable 'how to wait' interface (busy for lowest latency, backoff for shared machines, sleep for CI) selected by an env/param, with identical default behaviour. aeron-samples SetControllableIdleStrategy shows changing the strategy at run time. The aeron-client C++ wrapper headers are small and can be ported.
+  - speed claim: none
+  - read: agrona/src/main/java/org/agrona/concurrent/BackoffIdleStrategy.java: idle(), DEFAULT_* constants, agrona/src/main/java/org/agrona/concurrent/IdleStrategy.java, aeron repo: aeron-client/src/main/cpp_wrapper/concurrent/BackOffIdleStrategy.h, BusySpinIdleStrategy.h, YieldingIdleStrategy.h, SleepingIdle
+- **Aeron IdleStrategy family (C, C++ wrapper)** (rel 5, library, Apache-2.0 (adaptable with attribution)) https://github.com/aeron-io/aeron/blob/9d54639f05e0b3e413c01ccf94283896daf8994f/aeron-client/src/main/c/aeron_agent.c
+  - bottlenecks: P1, P2, P3
+  - The idle policy is a plain function taking work_count. It resets on work and escalates spin, then sched_yield, then nanosleep with doubling park time (min 1 us, max 1 ms by default). The SIH loop could take an idle strategy chosen at runtime (busy-spin for max-speed, backoff for default) with no new dependency. Also has Sleeping, Yielding, BusySpin, NoOp and a runtime-controllable variant.
+  - speed claim: none
+  - read: aeron-client/src/main/c/aeron_agent.c: aeron_idle_strategy_backoff_idle, _sleeping_idle, _yielding_idle, _busy_spinning_idle (around lines 35-130), aeron-client/src/main/cpp_wrapper/concurrent/BackOffIdleStrategy.h, aeron-samples/.../SetControllableIdleStrategy.java, aeron-client/src/main/c/concurre
+- **Agrona IdleStrategy family (Backoff, BusySpin, Yielding, Sleeping, Controllable, NoOp)** (rel 5, library, Apache-2.0 (adaptable with attribution)) https://github.com/aeron-io/agrona
+  - bottlenecks: P1, P2, P3, P5
+  - A tiny interface (idle(workCount), reset()) with swappable strategies. BackoffIdleStrategy is a three-phase state machine: spin, then yield, then park with exponential backoff. SIH could take the same shape as a runtime-selectable WaitStrategy (spin, then pause, then sched_yield, then ppoll/futex) chosen by a parameter. ControllableIdleStrategy shows how to change the mode live. Default behaviour can stay as usleep(100) for identical default output.
+  - speed claim: No latency figure found. Source read at commit ea35cc3: defaults are 10 spins, 5 yields, park 1 us to 1 ms. Hash read from the tree listing; I did not verify the 40-char form.
+  - read: agrona/src/main/java/org/agrona/concurrent/BackoffIdleStrategy.java (idle(), constants DEFAULT_MAX_SPINS=10, DEFAULT_MAX_YIELDS=5, MIN_PARK 1000 ns, MAX_PARK 1,000,000 ns), agrona/src/main/java/org/agrona/concurrent/IdleStrategy.java, agrona/src/main/java/org/agrona/concurrent/ControllableIdleStrate
+- **AirSim sensor models (ImuSimple, GaussianMarkov, DelayLine, FrequencyLimiter, GpsSimple, BarometerSimple, MagnetometerSimple)** (rel 5, library, MIT (per file headers; GitHub reports NOASSERTION)) https://github.com/microsoft/AirSim
+  - bottlenecks: C2, C3, C14
+  - Header-only, no-dependency building blocks. GaussianMarkov (alpha = exp(-dt/tau); out = alpha*out + (1-alpha)*N*sigma), a time-stamped DelayLine for sensor latency, and a FrequencyLimiter for per-sensor rates. ImuSimpleParams takes datasheet figures (ARW in deg/sqrt(hr), bias stability and tau) and converts them to SI. This is the closest match to what SIH needs for C2 (bias drift) and C14 (latency, rates). The repo is archived but the headers are MIT per their file headers; GitHub's detector reports NOASSERTION, so check the LICENSE file.
+  - speed claim: none
+  - read: AirLib/include/common/GaussianMarkov.hpp (update), AirLib/include/common/DelayLine.hpp, AirLib/include/common/FrequencyLimiter.hpp, AirLib/include/sensors/imu/ImuSimple.hpp, AirLib/include/sensors/imu/ImuSimpleParams.hpp, AirLib/include/sensors/gps/GpsSimple.hpp, AirLib/include/sensors/barometer/Bar
+- **Apache NuttX 'sim' architecture (arch/sim)** (rel 5, runner-or-infrastructure, Apache-2.0 (not confirmed from a file header)) https://github.com/apache/nuttx/tree/master/arch/sim/src/sim
+  - bottlenecks: P5, P1, P2, P3
+  - Opened the source. NuttX is the RTOS PX4 itself runs on, and its sim arch runs the whole OS on ONE host thread: sim_switchcontext.c saves and restores register state (sim_saveusercontext / sim_fullcontextrestore) instead of using pthreads, so a task switch is zero host wake-ups. Time comes from a oneshot driver (sim_oneshot.c) that keeps a sorted list of expiries and arms one host CLOCK_MONOTONIC timer (host_settimer in posix/sim_hosttime.c, delivered as SIGALRM). Idle (up_idle) just calls sim_timer_update. This is the strongest run-to-completion model: lift the 'one execution context, one armed timer for the next deadline' design. The host timer is wall-clock, so fast-forward is not built in; it would be a small change (jump the clock to the next expiry when idle).
+  - speed claim: none
+  - read: arch/sim/src/sim/sim_switchcontext.c: up_switch_context, arch/sim/src/sim/sim_oneshot.c: sim_timer_update_internal, sim_oneshot_set_timer, arch/sim/src/sim/posix/sim_hosttime.c: host_settimer, host_sleepuntil, host_gettime, arch/sim/src/sim/sim_idle.c: up_idle, arch/sim/src/sim/posix/sim_hostsmp.c (
+- **ArduPilot SIM_Aircraft::sync_frame_time (sleep-debt pacing) and time_advance** (rel 5, source-file, GPL-3.0 (reimplement only)) https://github.com/ArduPilot/ardupilot/blob/b0af1735b8fec3d00458d8347d5ef2a9ffe43b83/libraries/SITL/SIM_Aircraft.cpp
+  - bottlenecks: P2, P3
+  - Pacing by accumulated sleep debt: debt += target_dt - actual_dt, clamped at -0.1 s, and the thread sleeps only once debt exceeds min_sleep_time, then subtracts the measured sleep. This replaces a usleep per step (including usleep(0)) with rare, larger sleeps, and goes to zero cost when the sim runs slower than the target. SIM_SPEEDUP is a live parameter (setup_frame_time). achieved_rate_hz is measured every 10 ms and logged as ASpdU, which gives a built-in 'achieved speedup' readout.
+  - speed claim: none
+  - read: libraries/SITL/SIM_Aircraft.cpp: time_advance() line 261, setup_frame_time() 275, sync_frame_time() 297-335, set_speedup() 689, ASpdU log field around line 522
+- **ArduPilot SITL (SIM_ parameters, SIM_Aircraft, Lua sim binding, autotest)** (rel 5, simulator, GPL-3.0 (idea only)) https://github.com/ArduPilot/ardupilot/tree/master/libraries/SITL
+  - bottlenecks: C2, C3, C4, C5, C6, C8, C10, C11, C14, P3
+  - A working catalogue of runtime-changeable simulator knobs, each a normal parameter picked up live: SIM_WIND_SPD/DIR/DIR_Z/TURB/TC/T (wind profile type), SIM_DRIFT_*, SIM_TEMP_*, SIM_VIB_FREQ and SIM_VIB_MOT_*, SIM_GYR_FAIL_MSK, SIM_ENGINE_FAIL, SIM_IMU_POS, SIM_SPEEDUP. Aircraft::update_wind (opened) is a first-order IIR-filtered turbulence with horizontal and vertical components; add_noise scales IMU noise by throttle; add_shove_forces/add_twist_forces/add_external_forces are disturbance inputs. bindings.desc exposes SITL::SIM as 'sim' with set_pose to Lua scripts, and autotest drives scenarios from Python. Directly covers the C2/C4/C8/C11 catalogue and the SIM_SPEEDUP live change. GPL-3.0: reimplement only.
+  - speed claim: none
+  - read: libraries/SITL/SITL.cpp (AP_GROUPINFO table: names, defaults, ranges), libraries/SITL/SIM_Aircraft.cpp: update_wind (~L903), add_noise (~L340), add_shove_forces (~L1257), add_twist_forces (~L1353), add_external_forces (~L1383), get_air_density (~L1414), set_speedup (~L689), set_pose (~L1450), librar
+- **ArduPilot SITL (libraries/SITL + AP_*_SITL sensor backends)** (rel 5, simulator, GPL-3.0 (idea only, no text may be copied into BSD-3 PX4)) https://github.com/ArduPilot/ardupilot/tree/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/SITL
+  - bottlenecks: C2, C3, C4, C10, C14, C1
+  - The broadest catalogue of runtime-changeable sensor error knobs in any autopilot simulator: per-instance IMU bias, scale, noise, fail value and fail mask; IMU temperature curve with TCAL; motor-rpm-scaled harmonic vibration (VIB_MOT_*); fixed-frequency vibration; baro noise, drift, glitch, freeze, delay buffer; GPS lag (interpolated history), horizontal and vertical noise, glitch, velocity glitch, jamming, fix type, byte loss; mag offsets, diagonal and off-diagonal, scaling, per-instance fail, delay; sonar noise and glitch; TIME_JITTER; turbulence IIR filter. Every one is an AP_Param, which is the model for how SIH could let parameters change per sensor live. Use it as the checklist of variables and as a design reference for the interpolation-based delay and the motor-harmonic vibration.
+  - speed claim: none
+  - read: libraries/AP_InertialSensor/AP_InertialSensor_SITL.cpp (calculate_noise, get_temperature, accel loop lines ~95-190 for scale/bias/noise/vibe/fail, gyro loop from ~218), libraries/SITL/SITL.cpp (param table: ACC*_BIAS, GYR*_RND, GYR*_SCALE, ACC_FAIL_MSK, VIB_MOT_*, IMUT_*, MAG*_*, TIME_JITTER at ~600
+- **ArduPilot SITL SIM_Aircraft (time sync, wind, sensor noise)** (rel 5, source-file, GPL-3.0 (idea only)) https://github.com/ArduPilot/ardupilot/blob/master/libraries/SITL/SIM_Aircraft.cpp
+  - bottlenecks: P2, P3, C1, C3, C4, C14
+  - sync_frame_time() accumulates a signed sleep debt against a target dt of 1/(rate*speedup) and sleeps only once the debt exceeds min_sleep_time, instead of usleep per step, with a clamp on negative debt; this is a direct lift candidate for P2 and P3. update_wind() adds IIR-filtered turbulence, a per-position updraft and wind direction with a vertical angle, a simple sibling for C4. It also reports achieved vs target speedup.
+  - speed claim: none
+  - read: libraries/SITL/SIM_Aircraft.cpp: Aircraft::sync_frame_time (lines about 295-335), Aircraft::setup_frame_time, adjust_frame_time, time_advance (lines 259-290), Aircraft::update_wind (line about 903, iir_coef 0.98), Aircraft::rand_normal and the gyro/accel noise lines (about 340-360)
+- **ArduPilot SITL main-thread-driven physics step (SITL_State::wait_clock, _fdm_input_step, Scheduler::stop_clock/timer_event)** (rel 5, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/AP_HAL_SITL/SITL_State.cpp
+  - bottlenecks: P1, P5, P8
+  - The flight stack's main thread, while it 'sleeps' in delay_microseconds, calls the physics step itself (_fdm_input_step) which advances the stopped clock and fires all timer callbacks inline under sitl_begin/end_atomic. Other threads only poll with usleep(10). That is run-to-completion with no separate time-master thread and no per-tick futex hand-off for the main loop, a direct answer to 'what should a time master wait on' and to thread wake-ups per tick. Also note semaphore_wait_hack_required(): a lock-taking thread with a timeout still advances time, which is the same class of deadlock as the PX4 logger/lockstep freeze (P8). GPLv3: reimplement the idea only.
+  - speed claim: none
+  - read: libraries/AP_HAL_SITL/SITL_State.cpp: SITL_State::wait_clock (line ~133), _fdm_input_step (just above it, ends with HALSITL::Scheduler::timer_event()), libraries/AP_HAL_SITL/Scheduler.cpp: delay_microseconds (~128), stop_clock (~301, runs IO procs every 10 ms sim time), semaphore_wait_hack_required 
+- **ArduPilot SITL parameter catalog (SIM_* params in SITL.cpp)** (rel 5, source-file, GPL-3.0 (ideas and variable list only; no text may be copied into BSD-3 PX4)) https://github.com/ArduPilot/ardupilot/blob/b0af1735b8fec3d00458d8347d5ef2a9ffe43b83/libraries/SITL/SITL.cpp
+  - bottlenecks: C2, C3, C4, C5, C6, C10, C14
+  - The closest existing worked example of 'every simulator condition is a live parameter': per-IMU gyro/accel noise, bias, scale, fail flags, IMU temperature model, vibration (frequency plus motor harmonics), wind with turbulence, vertical wind component, wind profile type, temperature, battery voltage/capacity/resistance, loop delay, RC fail, speedup, origin position. Use it as the variable list and naming scheme for an SIH catalog. Also shows the 'parameter changes apply on next step' model (speedup re-read every frame), relevant to C10.
+  - speed claim: none
+  - read: libraries/SITL/SITL.cpp: AP_GROUPINFO entries SPEEDUP, WIND_SPD, WIND_DIR, WIND_DIR_Z, WIND_TURB, WIND_T, WIND_T_ALT, WIND_T_COEF, TEMP_START, DRIFT_SPEED, VIB_FREQ, VIB_MOT_MAX, VIB_MOT_HMNC, LOOP_DELAY, BATT_VOLTAGE, BATT_CAP_AH, BATT_RES_OHM, IMUT_START/END/TCONST, ACC1_BIAS, GYR1_RND, GYR1_SCALE
+- **ArduPilot SITL scheduler (AP_HAL_SITL Scheduler.cpp)** (rel 5, source-file, GPL-3.0 (GitHub license not read; ArduPilot is GPLv3). Idea only, no text copy.) https://github.com/ArduPilot/ardupilot/blob/master/libraries/AP_HAL_SITL/Scheduler.cpp
+  - bottlenecks: P1, P2, P5, P8
+  - Competing autopilot SITL. Only the main thread advances the simulated clock. A delay in the main thread moves the clock and runs the timer and IO callbacks inline, so there is no cross-thread wake-up per tick. This is the clearest example of run-to-completion execution in a lockstep autopilot sim. I read it only by grepping for keywords, not in full.
+  - speed claim: none
+  - read: libraries/AP_HAL_SITL/Scheduler.cpp: Scheduler::delay_microseconds (about line 129), the comment 'only the main thread ever moves stuff forwards' (about line 121), Scheduler::_run_io_procs (about line 265) and the code that sets _stopped_clock_usec (about line 303), libraries/AP_HAL_SITL/Semaphores.
+- **ArduPilot SITL sensor and failure simulation (libraries/SITL, AP_InertialSensor_SITL, AP_Baro_SITL, SIM_GPS)** (rel 5, simulator, GPL-3.0 (ideas only)) https://github.com/ArduPilot/ardupilot
+  - bottlenecks: C2, C3, C4, C10, C11, C14
+  - The largest catalogue of runtime-settable sensor conditions in one flight stack, and a model for the variable list SIH lacks. IMU: per-instance bias, scale, noise, fail masks, a stuck value, board-temperature curve (IMUT_*), motor-harmonic vibration (VIB_MOT_*) and fixed-frequency vibration (VIB_FREQ). GPS: lag by interpolation (LAG_MS), glitch, velocity glitch that drifts position (spoofing), jamming, noise, accuracy. Baro: noise, drift, glitch, delay, wind coefficients. Mag: noise, delay, motor interference, anomalies. Also wind turbulence with an IIR filter and the INS_FILE record/replay of real IMU samples. GPL-3.0, so reimplement the ideas and copy no text. The SIM_* parameters are plain AP_Param floats, so they update live (relevant to C10).
+  - speed claim: none
+  - read: libraries/SITL/SITL.cpp (AP_GROUPINFO tables: ACC*_RND/BIAS/SCAL/FAIL, GYR*_*, VIB_MOT_*, MAG_*, IMUT_*, SONAR_*), libraries/AP_InertialSensor/AP_InertialSensor_SITL.cpp (generate_accel, generate_gyro, calculate_noise, gyro_drift, timer_update, INS_FILE record), libraries/SITL/SITL_Baro.cpp and libr
+- **ArduPilot SITL time-master: AP_HAL_SITL Scheduler + SITL_State::wait_clock / _fdm_input_step** (rel 5, simulator, GPL-3.0 (idea only; no text can be copied into BSD-3 PX4)) https://github.com/ArduPilot/ardupilot/blob/b0af1735b8fec3d00458d8347d5ef2a9ffe43b83/libraries/AP_HAL_SITL/SITL_State.cpp
+  - bottlenecks: P1, P5, P8
+  - The main thread is the time master and runs the physics step and all timer/IO callbacks inline, 'pretending to be the IO or timer threads' (run-to-completion, no cross-thread wake per tick). Any thread that wants time to pass calls wait_clock, which steps the model itself if it is the main thread. Other threads only usleep(10) in a loop, with no futex wake. Includes semaphore_wait_hack_required, which advances time when an IO-proc is blocked on a semaphore with a timeout. That is the same class of freeze as the P8 logger/IMU-off stop. Also throttles the main thread when the serial-0 TCP out-queue is full (backpressure instead of letting MAVLink flood).
+  - speed claim: none
+  - read: libraries/AP_HAL_SITL/SITL_State.cpp: wait_clock(), _fdm_input_step() (about lines 95-195), libraries/AP_HAL_SITL/Scheduler.cpp: delay_microseconds(), semaphore_wait_hack_required() comment (lines 109-127), stop_clock(), _run_io_procs()
+- **Basilisk (AVSLab) GaussMarkov, imuSensor, Saturate, Discretize, sensor fault tests** (rel 5, simulator, ISC) https://github.com/AVSLab/basilisk
+  - bottlenecks: C1, C2, C3, C13
+  - The cleanest statement of the random-stream problem. GaussMarkov holds its own seeded engine, and deriveSecondarySeed() makes distinct, collision-checked streams for gyro and accel from one base seed. That is the fix for C1 (one global rand() shared by all threads). imuSensor also applies saturation (clipping, C2) and discretisation (resolution) as separate stages, and the repo has unit tests for sensor faults (test_magnetometerFaults.py, test_coarseSunSensorFaults.py). ISC license, copyable with attribution. The code is Eigen-heavy, so the pattern, not the code, fits MCU flash.
+  - speed claim: none
+  - read: src/architecture/utilities/gauss_markov.cpp (deriveSecondarySeed, computeNextState), src/simulation/sensors/imuSensor/imuSensor.cpp (applySensorSaturation, Discretize use, walkBounds), src/architecture/utilities/saturate.cpp, src/architecture/utilities/discretize.cpp, src/simulation/sensors/magnetom
+- **Box2D v3 and its determinism write-up** (rel 5, physics-engine, MIT) https://github.com/erincatto/box2d
+  - bottlenecks: C13, C1, P5, P7
+  - Smallest complete example of a determinism gate: test_determinism.c runs a fixed scene and checks two numbers (step at which all bodies sleep, and a hash of body transforms) against hard-coded constants, across thread counts and in CI on x64 and ARM. The article lists the exact traps: no fast-math, -ffp-contract=off, own cos/sin/atan2 approximations, merge worker results with bitwise OR instead of sorting. The same golden-hash pattern would prove SIH output is unchanged at default settings.
+  - speed claim: none
+  - read: test/test_determinism.c (EXPECTED_SLEEP_STEP, EXPECTED_HASH, workerCount loop), samples/sample_determinism.cpp, src/math_functions.c (b2ComputeCosSin, b2Atan2), src/solver.c and src/constraint_graph.c (task stages, graph coloring), https://box2d.org/posts/2024/08/determinism/ (article: 'sleep step i
+- **Box2D v3 cross-platform determinism (Falling Hinges)** (rel 5, write-up, MIT) https://box2d.org/posts/2024/08/determinism/
+  - bottlenecks: C13, P7
+  - Concrete recipe for float determinism: -ffp-contract=off (no FMA), no fast-math, custom atan2f/sin/cos approximations because libm differs per platform, sqrtf is safe. Test = two numbers (steps until all asleep: 310; hash of all transforms: 0x5e70e5fe) checked in CI over thread counts, compilers and x64/ARM. Directly relevant to SIH's ECEF to LLA trig on the hot path (P7): if trig is replaced for speed it must stay bit-reproducible, and SIH would need the same flags on 54 boards.
+  - speed claim: CLAIM by author: no noticeable performance impact from disabling FMA / custom trig (no figures)
+  - read: blog post https://box2d.org/posts/2024/08/determinism/, test/test_determinism.c (EXPECTED_SLEEP_STEP, EXPECTED_HASH, worker-count loops), shared/determinism.c and determinism.h (CreateFallingHinges, UpdateFallingHinges, hash), src/math_functions.c (b2Atan2 etc.) at dd8bd3fb525f0f33f1079f8ca3c5770783
+- **Box3D (Erin Catto) determinism harness** (rel 5, physics-engine, MIT (copyable with attribution)) https://github.com/erincatto/box3d
+  - bottlenecks: C13, P6, P7
+  - Ships a golden-hash determinism test: fixed scenes run for N steps, then a state hash is compared with a constant, for several worker-thread counts, with separate float and double constants. This is a ready template for the 'prove a change did not alter behaviour' check at SIH default settings. README lists cross-platform determinism, data-oriented layout and SIMD.
+  - speed claim: none
+  - read: test/test_determinism.c (RAGDOLL_HASH etc., workerCount loop, ENSURE on sleepStep and hash), shared/determinism.h and shared/determinism.c (scenes and hash accumulation), samples/sample_determinism.cpp, src/solver.c, src/constraint_graph.c
+- **Catalyzer: sfork and init-less booting (ASPLOS 2020)** (rel 5, paper, paper; ideas only) https://ipads.se.sjtu.edu.cn/zh/publications/DuASPLOS20.pdf
+  - bottlenecks: P4, P6
+  - Directly answers 'why forkserver fails for multithreaded programs and what to do': sfork dumps thread states, cancels all but the main thread, forks, then restarts the threads in parent and child; shared files go read-only through a file server; memory and system state are restored on demand. Mechanism fits PX4 because lockstep gives a natural quiescent point (all work queue threads waiting on time).
+  - speed claim: Claim (paper abstract as seen in search snippet, not re-opened): startup under 1 ms in the best case, vs. cold boot of a gVisor/serverless sandbox; hardware not read.
+  - read: Section on sfork (sandbox fork), multithread handling, Section on on-demand restore of user memory and system state, Evaluation section for hardware and baselines
+- **Crazyflow (JAX batched quadrotor simulator)** (rel 5, simulator, MIT (copyable with attribution)) https://github.com/learnsyslab/crazyflow
+  - bottlenecks: P3, P4, P7, C1, C6, C8, C12, C14
+  - Closest in spirit to SIH: a quadrotor with first-principles dynamics (per-motor arm length, rotor lag, drag matrix, disturbance force and torque inputs) whose step and reset are ordered dicts of plain functions that can be inserted or replaced by name. Euler, RK4 and symplectic Euler are selectable, so you can measure integrator error against step size (P7). reset(mask) resets only chosen worlds, and a JAX PRNG key is the seed, which is the pattern to replace the global srand(1234) with per-stream keys (C1). Controllers run at their own frequencies inside one step.
+  - speed claim: Claim and measurement (README table): first-principles dynamics, one drone, AMD Ryzen 9 7950X CPU vs RTX 4090 GPU. CPU 3.3 M steps/s at 64 worlds and 12.6 M at 262,144 worlds. GPU 914 M steps/s at 262,144 worlds. The abstract and an earlier README state about 700 M steps/s at 1 M worlds. Paper: https://arxiv.org/abs/2606.01478. The paper's own text says the benchmarks used the same 7950X + 4090 machine and all simulators were configured with the same physics and control frequencies.
+  - read: crazyflow/sim/integration.py (euler, rk4, symplectic_euler), crazyflow/sim/pipeline.py (append_fn, prepend_fn, replace_fn), crazyflow/sim/sim.py (build_step_fn, build_reset_fn, seed, reset(mask)), crazyflow/dynamics/first_principles/dynamics.py (dist_f, dist_t, rotor_vel, drag_matrix), crazyflow/dyn
+- **Drake (Simulator, event system, integrators)** (rel 5, physics-engine, BSD-3-Clause (LICENSE.TXT opened; GitHub API reports NOASSERTION)) https://github.com/RobotLocomotion/drake
+  - bottlenecks: C10, C11, C14, P7, P2, P3
+  - Best model for the scenario layer. Simulator::AdvanceTo steps to exact event times, runs publish, discrete-update and unrestricted-update events, and uses witness functions (zero-crossing detection with a direction flag) so something can trigger at an exact simulated time or on a state condition. Also has target realtime rate and a menu of fixed and error-controlled integrators with documented stats. This is the cleanest answer to 'apply at an exact simulated time' and 'trigger on a condition'.
+  - speed claim: none
+  - read: systems/analysis/simulator.h (pseudocode for AdvanceTo, Initialize, set_target_realtime_rate, publish_every_time_step), systems/framework/witness_function.h and event.h, event_collection.h, systems/analysis/integrator_base.cc (error control, step-size limits), systems/analysis/runge_kutta3_integrato
+- **Eclipse iceoryx2** (rel 5, library, Apache-2.0 OR MIT (adaptable with attribution)) https://github.com/eclipse-iceoryx/iceoryx2
+  - bottlenecks: P1, P5, P6
+  - Event and notification layer: a Notifier sets an event id in a bit set and wakes a Listener, with a pluggable wake mechanism (futex, pipe, busy-wait). That is a template for replacing both the SIH actuator poll and uORB's lock plus callback plus ScheduleNow chain. The safely-overflowing SPSC index queue is a lossy per-subscriber queue with uORB's overwrite semantics. A no-heap, fixed-capacity lock-free building-blocks layer (bb) is mostly header-like and could fit flash limits.
+  - speed claim: none
+  - read: iceoryx2-cal/src/event/mod.rs, common.rs, event_state/bit_set.rs (event ids as bit set, notifier/listener), iceoryx2/src/waitset.rs (multiplexed wait over listeners and timers), iceoryx2-bb/lock-free/src/spsc/safely_overflowing_index_queue.rs, iceoryx2-bb/lock-free/src/mpmc/bit_set.rs, unique_index_
+- **FoundationDB Flow simulator (fdbrpc/sim2.cpp runLoop)** (rel 5, simulator, Apache-2.0) https://github.com/apple/foundationdb/blob/main/fdbrpc/sim2.cpp
+  - bottlenecks: P5, P1, P3, C1, C11, C13
+  - The strongest run-to-completion example. Sim2::runLoop() is a single-threaded loop: if the task queue can sleep it adds getSleepTime() to simulated time (jump to the next deadline, plus a seeded random jitter), then processReadyTimers(time), then runs every ready task to completion. There are no thread wake-ups at all. It shows what a time master should wait on: nothing, because it runs the work. For SIH this suggests running work-queue items inline on the SIH thread in simulated-time order (the owner's one-thread test points the same way). Deterministic seeded randomness also informs C1. Apache-2.0.
+  - speed claim: none
+  - read: fdbrpc/sim2.cpp: Sim2::runLoop() (lines about 1588-1622), execTask(), The taskQueue class in the same file (canSleep, getSleepTime, processReadyTimers)
+- **GGPO SyncTest (rollback every frame and compare checksums)** (rel 5, tool, MIT) https://github.com/pond3r/ggpo/blob/master/src/lib/ggpo/backends/synctest.cpp
+  - bottlenecks: C13, C10
+  - SyncTestBackend::IncrementFrame saves state and a checksum, rolls back a few frames, re-simulates, and raises 'Checksum for frame N does not match saved' on any difference. A direct self-test for SIH: snapshot state, replay k steps, compare a hash, and it catches hidden state (static variables, uninitialised members, rand). The same save/load state API is the basis for reset-instead-of-restart (P4).
+  - speed claim: none
+  - read: src/lib/ggpo/backends/synctest.cpp: IncrementFrame (lines ~103-160), LogSaveStates, src/lib/ggpo/sync.cpp: SaveCurrentFrame, LoadFrame, checksum, GGPOSessionCallbacks save_game_state / load_game_state in include/ggponet.h
+- **Gazebo gz-sensors GaussianNoiseModel** (rel 5, library, Apache-2.0) https://github.com/gazebosim/gz-sensors
+  - bottlenecks: C2, C3
+  - Small per-channel noise object: white noise, a constant bias drawn once, a first-order Gauss-Markov dynamic bias discretised exactly (sigma_b_d = sqrt(-sigma_b^2*tau/2*expm1(-2dt/tau)), phi_d = exp(-dt/tau)), and quantisation by precision. The exact-discretisation form keeps the bias statistics independent of step size, which matters for 200-2000 Hz SIH. It is about 40 lines and could be lifted as a template for an SIH noise stage. Its own comment says it is based on RotorS.
+  - speed claim: none
+  - read: src/GaussianNoiseModel.cc (ApplyImpl, Load), src/Noise.cc, include/gz/sensors/Noise.hh, src/ImuSensor.cc (how noise is applied per axis)
+- **Gazebo gz-sim SimulationRunner (run loop, RTF and hybrid sleep/spin pacing)** (rel 5, simulator, Apache-2.0 (adaptable with attribution)) https://github.com/gazebosim/gz-sim
+  - bottlenecks: P2, P3, C10, C14
+  - The Run loop schedules each step against an absolute nextUpdateTime (no drift), sleeps until 200us before the deadline then busy-waits the rest (comment says plain sleep undershoots because of C-state wake latency), and treats real_time_factor < 1e-9 as updatePeriod 0 (as fast as possible). Step size and RTF can be changed live by a physics message. This replaces SIH's gettimeofday + usleep(n) + usleep(0) pacing and gives one honest 'unthrottled' switch.
+  - speed claim: none
+  - read: src/SimulationRunner.cc lines ~175-218 (stepSize, desiredRtf, updatePeriod = step/RTF, 0 when RTF<1e-9), src/SimulationRunner.cc lines ~495-530 (live change of step size and RTF), src/SimulationRunner.cc lines ~956-1070 (Run loop: nextUpdateTime, kSpinThreshold = 200us, sleep_until then spin, blocki
+- **GzDRL (Haridevan, Kang, Shan, arXiv 2609.13243) - middleware-free single-process Gazebo stepping** (rel 5, paper, MIT) https://github.com/amaldevh/gz-drl
+  - bottlenecks: P1, P5, P6, P4, C1, C13
+  - Replaces ROS/Gazebo-transport message passing with a direct call to gz::sim::Server::Run, K physics steps per policy action, so actions land at exactly the next physics update with no polling. Directly matches P1 (the usleep(100) actuator wait) and P5. Domain randomization is done by mutating a cached SDF model and respawning the entity, which avoids re-parsing the world (P4). Determinism check by identical checkpoint parameter hashes across same-seed runs is a model for C13.
+  - speed claim: Hover task, 1 ms physics step. Workstation (AMD Threadripper 3960X, 256 GB, 2x RTX A6000): GzDRL GazeboPool peak 78.58 +/-2.08 x10^3 steps/s at 128 envs vs PyBullet-Drones 21.95k, OmniDrones 21.15k, Aerial Gym 21.02k, ROS 2 multiprocessing 2.59k. Laptop (Ryzen 9 7940HS, RTX 4060): GzDRL 43.38k vs Aerial Gym 44.56k. Multi-agent 20 agents: Aerial Gym 5.53k vs GzDRL 3.18k. Source: https://arxiv.org/html/2609.13243
+  - read: DRLServer class (wraps gz::sim::Server, calls Run K times per action), DRLHelperSystem (PostUpdate reads state, handles reset and randomization), GazeboPool and AsyncDRLServerPool (adapted from EnvPool)
+- **Isaac Lab EventManager / EventTerm** (rel 5, library, BSD-3 for core Isaac Lab per README (isaaclab_mimic is Apache-2.0): adaptable with attribution) https://github.com/isaac-sim/IsaacLab
+  - bottlenecks: C11, C12, C1, C6, C7, C8, C10
+  - Small, clean event scheduler: terms are tagged with a mode (startup, reset, interval, user-defined). Interval terms keep a per-env countdown sampled from a range, with an is_global_time option and a resample-on-reset flag. Terms are (func, params, ranges, operation add/scale/abs, distribution), so any variable can be randomized or pushed on a timer. Maps to SIH: a table of {mode, time or interval, variable id, distribution, params} run at the top of each step. The shipped term list (mass, inertia, COM, gains, gravity, friction, apply_external_force_torque, push_by_setting_velocity) is a ready checklist for C6-C9. get_term_cfg/set_term_cfg changes events at runtime.
+  - speed claim: none
+  - read: source/isaaclab/isaaclab/managers/event_manager.py: apply(), reset(), _prepare_terms(), set_term_cfg(), source/isaaclab/isaaclab/envs/mdp/events.py: _randomize_prop_by_op (~1841), _validate_randomization_params (~1898), randomize_rigid_body_mass/inertia/com, apply_external_force_torque (~1183), sour
+- **JSBSim script engine (FGScript events) and property tree** (rel 5, simulator, LGPL-2.1 (idea only, no text copy)) https://github.com/JSBSim-Team/jsbsim
+  - bottlenecks: C11, C10, C4, C8, C13, C14
+  - The closest model for a scenario layer: XML events with a condition (property compared with number or property, time via simulation/sim-time-sec), delay, persistent and continuous flags, notify, and set actions of type step, ramp or exp with time constant tc. Every variable is a named property settable at an exact sim time. Opened FGScript.cpp: RunScript fires per frame. FGFDMExec also has Hold, Resume and EnableIncrementThenHold(n) for deterministic step-N-then-hold stepping, which maps to lockstep. LGPL-2.1, so reimplement the idea only; do not copy text.
+  - speed claim: none
+  - read: src/input_output/FGScript.cpp: LoadScript (event parse ~L230-370), RunScript (~L393-540: Persistent/Continuous/Delay/FG_STEP/FG_RAMP/FG_EXP), src/math/FGCondition.cpp/.h, src/input_output/FGPropertyManager.cpp, src/FGFDMExec.h: Hold, EnableIncrementThenHold, RunIC, JSBSimScript.xsd (script schema), 
+- **Jolt Physics determinism: DeterminismLog, StateRecorder, golden hashes in CI** (rel 5, physics-engine, MIT) https://github.com/jrouwe/JoltPhysics
+  - bottlenecks: C13, P7
+  - Complete pattern for proving a change did not alter behaviour: PerformanceTest hashes all body positions/rotations after N steps (HashBytes) and CI compares with committed 64-bit hashes (-validate_hash) on Linux/Win/Mac/ARM/emscripten; a DeterminismLog text file of every float as hex lets you diff two builds to find the first divergent step; StateRecorder snapshots, steps, rewinds, steps again to verify determinism online. Exactly the integrity gate SIH needs: golden state hashes at default settings.
+  - speed claim: CLAIM in Docs/Architecture.md: CROSS_PLATFORM_DETERMINISTIC 'will make the library approximately 8% slower' (hardware not stated, workload not stated)
+  - read: Docs/Architecture.md section 'Deterministic Simulation' (l.787-850), Jolt/Physics/DeterminismLog.h (JPH_ENABLE_DETERMINISM_LOG), PerformanceTest/PerformanceTest.cpp l.459-490 (hash of transforms, validate_hash), Jolt/Physics/StateRecorder.h, StateRecorderImpl.cpp, Jolt/Core/HashCombine.h, UnitTests/
+- **Jolt Physics determinism: StateRecorder validation, DeterminismLog, CROSS_PLATFORM_DETERMINISTIC** (rel 5, physics-engine, MIT) https://github.com/jrouwe/JoltPhysics/blob/a76f1d7a8dfafc56e57a9490c5d118abe9c82969/Docs/Architecture.md
+  - bottlenecks: C13, P7, C10
+  - Three tools: (1) 'Check Determinism' records state, rewinds, redoes the step and compares via StateRecorder (IsValidating); (2) JPH_ENABLE_DETERMINISM_LOG writes every float as raw bits so two platforms' logs can be diffed; (3) a build flag listing exactly which compiler/flag rules give cross-platform equality (-ffp-model=precise, -ffp-contract=off, no std::hash). Direct source for an SIH golden-trace and flags checklist.
+  - speed claim: claim in docs: cross-platform deterministic build 'approximately 8% slower' (Architecture.md 'Deterministic Simulation', no hardware given)
+  - read: Docs/Architecture.md sections 'Deterministic Simulation' (~line 787) and 'Rolling Back a Simulation', Jolt/Physics/DeterminismLog.h (macro JPH_ENABLE_DETERMINISM_LOG), Jolt/Physics/StateRecorder.h, StateRecorderImpl.cpp, UnitTests/Physics/PhysicsDeterminismTests.cpp
+- **Linux PR_SET_TIMERSLACK (prctl man page)** (rel 5, write-up, documentation (man-pages)) https://man7.org/linux/man-pages/man2/PR_SET_TIMERSLACK.2const.html
+  - bottlenecks: P1, P2
+  - Directly explains a hidden cost of usleep(100) and usleep(sleep_time) in SIH: timer slack lets expiry be up to the slack late; the man page says init's value is 50,000 ns (50 us), inherited by children, and applies to nanosleep, clock_nanosleep, select/poll/epoll_wait and timed futex waits (so pthread_cond_timedwait and sem_timedwait too). It is not applied to threads under a real-time policy. A prctl(PR_SET_TIMERSLACK, 1) in the SIH thread is a one-line experiment; read-only here, not measured.
+  - speed claim: quoted (man page): timer slack of init is 50,000 nanoseconds; expirations may be up to the slack late. This is a default, not a measured latency.
+  - read: man page DESCRIPTION section
+- **Linux futex_wake and wake_q batching (kernel/futex/waitwake.c)** (rel 5, source-file, GPL-2.0 (idea only, no text may be copied)) https://github.com/torvalds/linux/blob/v6.12/kernel/futex/waitwake.c
+  - bottlenecks: P5, P1
+  - Read at v6.12. futex_wake() queues up to nr_wake waiters on a wake_q and calls wake_up_q() once after releasing the hash-bucket lock, so waking N waiters parked on the same word is one syscall. The waiters must share the word, so the cost is per-task try_to_wake_up (an IPI to a remote idle CPU, which is probably costly on a VM) rather than per-syscall. FUTEX_WAKE_BITSET lets many waiters share one word and be selected by mask. futex_wake_op() (line ~253) wakes two words in one syscall. Design idea for SIH: park all lockstep waiters on one sim-time word, each with its own bitset bit, and release the expired ones with one FUTEX_WAKE_BITSET.
+  - speed claim: none
+  - read: kernel/futex/waitwake.c: futex_wake(), futex_wake_mark(), futex_wake_op(), kernel/futex/syscalls.c: SYSCALL_DEFINE6(futex), futex_wake/futex_wait/futex_requeue syscalls
+- **Linux kernel doc: Guest halt polling (cpuidle-haltpoll)** (rel 5, write-up, GPL-2.0 (idea only)) https://github.com/torvalds/linux/blob/master/Documentation/virt/guest-halt-polling.rst
+  - bottlenecks: P5
+  - Describes the mechanism that avoids the IPI: while a vCPU polls, the POLL flag is set so a remote waker skips the IPI and the VM-exit. Important negative finding from source: drivers/cpuidle/cpuidle-haltpoll.c (present in the WSL 6.6 tree, CONFIG_HALTPOLL_CPUIDLE=y) refuses to load unless kvm_para_available() and (KVM_HINTS_REALTIME or force), so on Hyper-V the haltpoll driver cannot be enabled by 'force'. The only no-code-change way to get a polling idle on WSL2 is idle=poll on the kernel command line (documented in kernel-parameters.txt; burns all vCPUs, and the doc says it can interact badly with hyperthreading), or a custom kernel that removes the KVM check. Defaults: guest_halt_poll_ns 200000.
+  - speed claim: none
+  - read: Documentation/virt/guest-halt-polling.rst (benefit 1: POLL flag avoids IPI), drivers/cpuidle/cpuidle-haltpoll.c: haltpoll_want(), haltpoll_init() (kvm_para_available gate), Documentation/admin-guide/kernel-parameters.txt entry 'idle='
+- **MuJoCo (CPU core + MJX)** (rel 5, physics-engine, Apache-2.0 (can be adapted with attribution)) https://github.com/google-deepmind/mujoco
+  - bottlenecks: P1, P4, P7, P6, C8, C10, C11, C13
+  - mjcb_control runs the controller inside mj_step on the same thread, which removes the usleep poll between physics and flight stack (P1). mj_step1/mj_step2 split lets outside code act mid-step. mjSTATE bit-masks pack exactly the state or inputs you choose (control, qfrc_applied, xfrc_applied, mocap) for snapshot, reset and per-step injection (P4, C8, C11). mj_checkPos/Vel/Acc auto-reset on divergence. implicitfast integrator is the recommended answer to step-size accuracy (P7).
+  - speed claim: MJX docs (v3.8.0, mjx.rst 'SPS' figure text): single humanoid 650K steps/s on Apple M3 Max, 1.8M on 64-core AMD 3995WX (CPU MuJoCo, testspeed, 2 x numcore threads), 950K on an A100 (MJX-JAX, batch 8192), 2.7M on an 8-chip v5 TPU (batch 16384). Source: https://mujoco.readthedocs.io/en/3.8.0/_sources/mjx.rst.txt . Vendor docs, not independently reproduced.
+  - read: src/engine/engine_forward.c: mj_step, mj_step1, mj_step2, mj_forwardSkip (mjcb_control call near line 2640), mj_Euler, mj_implicit, mj_RungeKutta, mj_checkPos/Vel/Acc, src/engine/engine_callback.h: mjcb_control, mjcb_time, mjcb_sensor hooks, python/mujoco/rollout.cc: threaded rollout with control_sp
+- **NVIDIA Warp rand.h (stateless PCG-hash RNG, rand_init(seed, offset))** (rel 5, source-file, Apache-2.0 (adapt with attribution; hash itself credited to Jarzynski & Olano, JCGT 2020)) https://github.com/NVIDIA/warp
+  - bottlenecks: C1, C2, C3, P7
+  - About 15 lines of integer code: 32-bit state, rand_pcg hash, rand_init(seed, offset) = pcg(seed + pcg(offset)), randf, Box-Muller randn with exactly two draws per sample (fixed draw count, unlike PX4's polar rejection loop). Tiny enough for flight-controller flash, no tables, per-instance state is one uint32. Best minimal drop-in to replace rand() in math::generate_wgn.
+  - speed claim: none
+  - read: warp/native/rand.h at e505f136824649cb83278ba3057f061aa161d141: rand_pcg (l.29), rand_init (l.36-39), randf (l.75), randn (l.83)
+- **NumPy SeedSequence / spawn / Philox / jumped** (rel 5, library, BSD-3-Clause-style for NumPy; the PCG64 core under numpy/random/src/pcg64 carries its own MIT license file (repo license API reports NOASSERTION: read LICENSE.txt before copying)) https://numpy.org/doc/stable/reference/random/parallel.html
+  - bottlenecks: C1, C12, P6
+  - Defines the standard way to derive many independent streams from one root seed without coordination: hash-mix an integer list [stream_id, root_seed], never root_seed+id. Directly answers 'one global rand() shared by all threads': one stream per sensor/rotor/instance, keyed by a stable id, so draw order no longer depends on scheduling.
+  - speed claim: none
+  - read: doc page numpy/random/parallel.html (quoted: collision probability about n^2 * 2^-128; 'UNSAFE' root_seed + worker_id example), numpy/random/bit_generator.pyx: SeedSequence.mix_entropy, spawn, generate_state, numpy/random/_philox.pyx and numpy/random/src/philox/, numpy/random/src/pcg64/pcg64.h (jump
+- **PX4 LockstepScheduler (set_absolute_time / cond_timedwait) and fixes #26032, #29061, #28885, issues #27915, #29060** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29061
+  - bottlenecks: P5, P8, P2
+  - set_absolute_time takes a global signaling mutex plus the waits mutex and then locks and broadcasts each expired waiter's condition variable on every clock advance; this is the likely source of kernel futex time in the SIH thread. The recent fixes (signal-loss race, ABBA deadlock, lost wakeup, stale stack condvar broadcast) are also a lead for the 'one of nine lean-mode runs froze' symptom: #29060 reports SITL lockstep time stopping after a freeze on v1.18.0-rc1, fixed on main only. Check the pinned commit includes #26032.
+  - speed claim: none
+  - read: platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp (set_absolute_time, cond_timedwait, usleep_until), platforms/posix/src/px4/common/lockstep_scheduler/include/lockstep_scheduler/lockstep_scheduler.h, issue #27915 root cause section, PR #28885 (lost wakeup and EKF2Selector 
+- **PX4 PR #28708/#28783 ekf2 replay: per-sample acknowledgement instead of quiescence barrier** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/28783
+  - bottlenecks: P1, P5, C13, P8
+  - Shows that a lockstep component token is not bound to the sample just published (27% of cycles ekf2_timestamps was not yet published when the barrier opened), and fixes it by blocking on the consumer's own per-sample output topic. That is a concrete answer to 'what should a time master wait on' for SIH: wait for a published ack (or a counted completion) per step, not for 'all queues idle'. Also a bitwise-reproducible replay is a ready model for golden-trace checks.
+  - speed claim: none
+  - read: src/modules/replay/Replay.cpp (block after each sensor_combined publication until ekf2_timestamps), src/modules/replay/ReplayEkf2.cpp, src/modules/ekf2/EKF2.cpp (ekf2_timestamps publication), PR #28708
+- **PX4 WhiteGaussianNoise.cpp (the code to replace)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot
+  - bottlenecks: C1, C2, C3
+  - Finding at the pinned commit: generate_wgn uses polar Box-Muller with a rejection loop on libc rand(), so the number of rand() draws per sample is variable and the single global rand() stream is shared by sih, sensor_*_sim and gz_bridge (comment says state is on stack so concurrent callers cannot corrupt samples, but draw order is still schedule-dependent). A counter-based replacement needs a fixed number of draws per sample (basic Box-Muller as in Warp randn, or inverse CDF).
+  - speed claim: none
+  - read: src/lib/mathlib/math/WhiteGaussianNoise.cpp at 95a0c23482329183d932ac99da00faa7e8d63143: generate_wgn, src/modules/simulation/simulator_sih/sih.cpp l.61 (srand(1234)), l.770-787 (accel/gyro noise), l.816 (airspeed), l.868-870 (ranging), src/lib/mathlib/math/test/WhiteGaussianNoiseTest.cpp
+- **PX4 failure_injection library + failure_injection_manager (in-tree)** (rel 5, library, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/lib/failure_injection
+  - bottlenecks: C11, C3, C14
+  - Already in PX4 at the pinned commit: a deduplicated failure_injection uORB topic, a Config class a producer polls once per loop, and Modes Off/Stuck/Garbage/Wrong/Slow/Delayed/Intermittent. SIH sensor publishers could call the same hook, so every SIH sensor gets failure modes with no new dependency and no behaviour change when Mode is Ok (any_active() is a free early-out). The scenario layer (timed or triggered failures) would sit on top of the manager. BSD-3-Clause, copyable. I only confirmed that gps.cpp, uavcan gnss.cpp and uavcan battery.cpp use failure_injection::; my consumer scan was partial, so it is not confirmed that SIH or the *_sim modules do not.
+  - speed claim: none
+  - read: src/lib/failure_injection/FailureInjection.hpp (Config::update, Config::mode, Stuck<MsgT>, process<MsgT>), src/lib/failure_injection/FailureInjection.cpp, src/modules/failure_injection_manager/FailureInjectionManager.cpp, src/modules/failure_injection_manager/FailureTable.cpp, src/modules/failure_in
+- **PX4 failure_injection_manager + lib/failure_injection (already in PX4 at the pinned commit)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/failure_injection_manager
+  - bottlenecks: C11, C3, C2, C6, C14
+  - In-tree, BSD-3 prior art for 'inject a failure by unit and instance with mode Off/Stuck/Garbage/Wrong/Slow/Delayed/Intermittent' via a deduplicated uORB topic plus a cached Config::update() per loop. SIH can consume the same topic with no new dependency, and the catalogue is the natural vocabulary for C11 scenario events and C3 sensor dropouts and latency. Check that SIH does not already honour it before building a parallel mechanism.
+  - speed claim: none
+  - read: src/lib/failure_injection/FailureInjection.hpp (Config, Mode, Stuck<MsgT>, MotorFailureMasks), src/modules/failure_injection_manager/FailureTable.hpp/.cpp (inject, injectMask, isSupported capability catalogue), src/modules/failure_injection_manager/FailureInjectionManager.cpp, src/modules/simulation
+- **PX4 lockstep_components (work queue quiescence barrier) + PR #28802** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/28802
+  - bottlenecks: P1, P5, P8
+  - The existing mechanism SIH waits on: a bitset of components, each work queue registers while busy, the barrier semaphore posts when all are idle. Read it to see why every idle moment of every queue wakes the SIH thread (likely a large part of the futex_wake and the ~25 context switches per tick), and how #28802 added SIH's own component to stop banked releases. Starting point for replacing it by a counted per-step completion or a single-thread run-to-completion mode.
+  - speed claim: Claim only: PR tests ran mavsdk_test_runner.py --speed-factor 10 on 4 to 8 CPUs; no real-time-factor figure given.
+  - read: platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_components.cpp (register_component, lockstep_progress, release_waiter, wait_for_components), platforms/posix/src/px4/common/lockstep_scheduler/test/src/lockstep_components_test.cpp, platforms/common/px4_work_queue/WorkQueue.cpp (where qu
+- **PX4 lockstep_scheduler (own code, the target of P5)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/platforms/posix/src/px4/common/lockstep_scheduler
+  - bottlenecks: P5, P1, P8
+  - set_absolute_time() walks a linked list of waiters under two mutexes and does pthread_mutex_lock + cond_broadcast + unlock for every expired waiter, then runs a 3-phase handshake. This is the 'signal every waiter when time advances' cost. The lift targets are a deadline-ordered min-heap and per-waiter futex or eventfd wakeups (Disruptor/Aeron/iceoryx2 patterns below). The bitset barrier in lockstep_components.cpp is already lock-free and is a good model to keep.
+  - speed claim: none
+  - read: platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp: set_absolute_time(), cond_timedwait(), usleep_until(), platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_components.cpp: lockstep_progress(), release_waiter(), platforms/posix/src/px4/common/lockstep_scheduler
+- **PX4 lockstep_scheduler.cpp (our own wake path)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp
+  - bottlenecks: P5, P8
+  - Read it: set_absolute_time takes _signaling_mutex then walks the timed-wait list and for each expired waiter does pthread_mutex_lock + pthread_cond_broadcast + unlock (a futex wake per expired waiter, phase 2). Each timed wait therefore costs a wake of that thread per time advance. Batching, or replacing with per-waiter futex deadlines in a single sorted structure, or running work items inline, cuts wakes per tick. Matches the measured 25 switches per tick.
+  - speed claim: none
+  - read: set_absolute_time phases 1-3 (lines ~50-125), cond_timedwait
+- **PX4 replay module (Replay.cpp, ReplayEkf2.cpp)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/replay
+  - bottlenecks: P2, P3, C10, C11, C13, C14
+  - A time master that is not SIH. It sets the clock with px4_clock_settime and paces with _speed_factor. ReplayEkf2 holds a 'wait for ekf2 to process this IMU sample' barrier (Ekf2UpdateSignal, a condition variable on an update counter with a timeout), so it waits on the consumer's output instead of polling. Replay also applies timed parameter changes from a file (replay_params_dynamic.txt: '<param> <value> <timestamp>'), which is a ready-made scenario-layer idea for C10/C11. Main-branch commits from 2026-09-18 show recent determinism work: 'wait for ekf2 to process each IMU sample instead of the lockstep component barrier' (bc0343cf6) and 'synthesize IMU samples missing from the log' (cc6010720). I could not tell whether the pinned commit includes all of them.
+  - speed claim: none
+  - read: Replay.cpp: handleTopicDelay (~1065-1090, speed factor and px4_clock_settime), dynamic parameter schedule (~199-236, ~985-990), main loop ~939-1030, ReplayEkf2.cpp: publishEkf2Topics (~219-261), Ekf2UpdateSignal::waitForUpdateAfter (~398-414), px4_lockstep_wait_for_components calls at ~82 and ~96, d
+- **PX4 uORB DeviceNode + SubscriptionCallback (own code, the P1/P5 lever already in tree)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/platforms/common/uORB/SubscriptionCallback.hpp
+  - bottlenecks: P1, P5
+  - publish_data() does fetch_add on the generation, memcpy, iterates the callback list calling call(generation+1), then poll_notify only when has_poll_waiters(). SubscriptionCallback already pushes a wakeup from the publisher thread with count and interval gates. SIH's wait for actuator_outputs_sim (sih.cpp lines 103-184: a while(!updated()) usleep(100) loop with a 10 s timeout) could instead register a SubscriptionCallback that posts a semaphore or futex, with no new dependency. That removes the 100 us quantisation. Needs a measurement before claiming a gain.
+  - speed claim: none
+  - read: platforms/common/uORB/uORBDeviceNode.cpp: publish_data() around lines 190-215, register_callback(), poll_notify_one(), platforms/common/uORB/SubscriptionCallback.hpp: SubscriptionCallbackWorkItem::call(), src/modules/simulation/simulator_sih/sih.cpp: lockstep_loop() lines 103-184
+- **PX4 uORB::SubscriptionBlocking (in-tree wake primitive)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/platforms/common/uORB/SubscriptionBlocking.hpp
+  - bottlenecks: P1, P2, P5
+  - Already in PX4: registers a uORB callback and blocks on pthread_cond with optional px4_pthread_cond_timedwait, so the usleep(100) poll on _actuator_out_sub.updated() in Sih::lockstep_loop could become a callback-driven wake with no new dependency. Read-only observation: call() does pthread_cond_signal without taking _mutex while updatedBlocking() checks updated() before locking, so a wake can be lost between the check and the wait; it only recovers via the timeout. Fix by using a futex-style sequence word or semaphore post, as in the folly/Serenity/BinarySemaphore patterns.
+  - speed claim: none
+  - read: platforms/common/uORB/SubscriptionBlocking.hpp: call(), updatedBlocking(), platforms/common/uORB/SubscriptionCallback.cpp/.hpp: registerCallback(), src/modules/simulation/simulator_sih/sih.cpp lines ~160-175 (the usleep(100) loop)
+- **RLtools / Learning to Fly (L2F) multirotor environment** (rel 5, simulator, MIT) https://github.com/rl-tools/rl-tools
+  - bottlenecks: P7, C1, C5, C6, C7, C8, C12, C14
+  - Header-only C++ templated multirotor model, the closest in shape to SIH and already a PX4 submodule at src/lib/rl_tools. Lift: compile-time-selected integrator (euler/rk4) as a template parameter, per-rotor thrust polynomial and separate rising/falling motor time constants, composable parameter structs (ParametersDisturbances, ParametersDomainRandomization, ParametersObservationDelay, observation and action noise), a sample_initial_parameters hook that redraws mass/inertia/thrust/disturbance per episode from an explicit RNG, and a CUDA benchmark harness.
+  - speed claim: claim: about 1.284 billion steps/s ('about 5 months of flight per second') on an Nvidia T2000 laptop GPU, 8,192 environments x 1,000,000 steps in a 6,380 ms kernel; paper says Flightmare is 200,000 steps/s on a laptop, about 6,420x slower. Source: Learning to Fly in Seconds, arXiv 2311.13081 HTML, Section V. Simulation rate 100 Hz, motor time constant 0.15 s. Integrator and dt not stated in text read. No CPU figure found.
+  - read: include/rl_tools/rl/environments/l2f/operations_generic/60_dynamics.h (multirotor_dynamics, motor rising/falling tau, integrator dispatch), include/rl_tools/rl/environments/l2f/operations_generic/10_sample_initial_parameters.h, include/rl_tools/rl/environments/l2f/multirotor.h (ObservationNoise, Act
+- **Random123 (Philox, Threefry, ARS) counter-based RNG** (rel 5, library, BSD-3-clause-style D. E. Shaw Research notice in LICENSE (permissive; adapt with attribution; GitHub API reports 'other')) https://github.com/DEShawResearch/random123
+  - bottlenecks: C1, C2, C3, C4, P7
+  - Stateless generators: output = f(key, counter). A sensor noise sample can be Philox(key=seed|sensor_id, counter=step_index), so draws depend only on simulated step number, not on call order, thread, or how many other draws happened. Also makes seeking (jump to step N for snapshot/restart, P4) free. Header-only C/C++, single-header include.
+  - speed claim: CLAIM: 'a few cycles per byte of random data returned' on modern architectures (no hardware named) - Random123 docs index.html; Salmon et al. SC11 paper has the measured tables (not opened)
+  - read: include/Random123/philox.h at 9545ff6413f258be2f04c1d319d99aaef7521150 (Philox4x32, rounds macro), include/Random123/threefry.h, docs/cbrng.dox, paper https://www.thesalmons.org/john/random123/papers/random123sc11.pdf
+- **RotorPy** (rel 5, simulator, MIT) https://github.com/spencerfolk/rotorpy
+  - bottlenecks: C2, C4, C6, C7, C13, C14
+  - Python multirotor simulator that already ships a preset aligned with PX4 SIH parameters (px4_sihsim_quadx_params.py, comments name SIH_MASS, SIH_IXX, SIH_T_TAU) and a PX4 HIL-over-MAVLink vehicle with lockstep. Gives an independent second implementation to cross-check SIH traces against (C13), plus Dryden turbulence/gust/spatial wind modules (C4), IMU and mocap sensor error models with artifacts (C2), rotor aerodynamics (drag, inflow, translational lift, flapping), and torch-batched vehicle, controller, wind and IMU classes.
+  - speed claim: claim (README): 'For simulations of >1000 drones, we have observed speedups of 25x purely on CPU compared to simulating all drones sequentially'. No hardware stated in README; examples/benchmark_batched_simulation.py measures it. Not opened as a measured result.
+  - read: rotorpy/vehicles/px4_sihsim_quadx_params.py, rotorpy/vehicles/px4_multirotor.py (step, _fetch_latest_px4_control with blocking lockstep, _send_hil_sensor), rotorpy/wind/dryden_winds.py, dryden_utils.py, spatial_winds.py, default_winds.py, batched_wind.py, rotorpy/sensors/imu.py, rotorpy/vehicles/mul
+- **RotorS gazebo_imu_plugin (ETH ASL)** (rel 5, source-file, Apache-2.0 (per file header; GitHub reports none; adaptable with attribution)) https://github.com/ethz-asl/rotors_simulator
+  - bottlenecks: C2, P7, C14
+  - Compact, exact-discretisation IMU error model: white noise sigma_d = density/sqrt(dt), bias as first-order Gauss-Markov with exact process covariance sigma_b_d = sqrt(-sigma_b^2*tau/2*(exp(-2dt/tau)-1)) [Maybeck 4-114], phi = exp(-dt/tau), plus turn-on bias. About 40 lines, no dependency. The 1/sqrt(dt) scaling makes noise invariant to step size, which SIH's fixed per-sample sigma (0.01 / 0.1 at 250 Hz) is not. Direct lift for C2 and for C14 variable-step.
+  - speed claim: none
+  - read: rotors_gazebo_plugins/src/gazebo_imu_plugin.cpp: GazeboImuPlugin::AddNoise (lines ~213-260), Load (lines ~60-120 parameter list), turn-on bias init (~line 199) at cd813b7a8c375d677352aa20ad20047feb661126
+- **SIH itself: srand(1234) and math::generate_wgn call sites (the target of this domain)** (rel 5, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/simulation/simulator_sih/sih.cpp
+  - bottlenecks: C1, C2, C3, C13
+  - Confirms the shape of the fix. sih.cpp line 61 calls srand(1234) once, and noise is drawn from the global generate_wgn() at lines 774-780 (accel and gyro noise), 816 (airspeed) and 869 (ranging beacon). Every sensor shares one global stream, so the value each sensor gets depends on call order. Replacing this with a (seed, stream_id, step) keyed generator removes the order dependence.
+  - speed claim: none
+  - read: sih.cpp:61 (srand), sih.cpp:764-787 (IMU noise), sih.cpp:816 (airspeed noise), sih.cpp:866-870 (ranging noise)
+- **TigerBeetle VOPR options_swarm (seed picks the whole fault configuration)** (rel 5, source-file, Apache-2.0) https://github.com/tigerbeetle/tigerbeetle/blob/68958eb757747d0fc96a79d1f9c2fa6766b67b48/src/vopr.zig
+  - bottlenecks: C12, C11, C13, C14
+  - One u64 seed builds a PRNG, then options_swarm(&prng) draws every simulator knob (loss, delay, fault rates), so one integer plus the git commit reproduces any run. Use this as the pattern for an SIH scenario/experiment layer: seed to sampled condition set, printed at start, replayable. Also has lite/performance presets and a --seed CLI path.
+  - speed claim: claim, not measured by us: 'One minute of VOPR time is equivalent to days of real-world testing' (docs/internals/vopr.md)
+  - read: src/vopr.zig: options_swarm (line ~379), options_lite (~529), options_performance (~537), src/vopr.zig: main seed handling (lines ~127-165), src/testing/packet_simulator.zig (delay/loss/partition model driven by the PRNG), docs/internals/vopr.md
+- **TigerBeetle stdx PRNG (xoshiro256++ seeded by SplitMix64, integer-only API)** (rel 5, source-file, Apache-2.0 (repo). Text cannot go into BSD-3 PX4 without Apache notice; the xoshiro/SplitMix algorithms themselves are public domain, so reimplement from the algorithm.) https://github.com/tigerbeetle/tigerbeetle/blob/68958eb757747d0fc96a79d1f9c2fa6766b67b48/src/stdx/prng.zig
+  - bottlenecks: C1, C12, P8
+  - A ~650-line RNG with no floating point in the API (Ratio a/b probabilities, unbiased int_inclusive, chances/enum_weighted, shuffle). It is a template for SIH's own tiny per-stream generator replacing srand(1234)/rand(): 32 bytes of state, seed to state via SplitMix64, same output on every platform. The integer-only API removes libm and float-rounding sources of cross-platform drift in the draw layer.
+  - speed claim: none
+  - read: src/stdx/prng.zig: from_seed, split_mix_64, next, src/stdx/prng.zig: int_inclusive (unbiased bounded ints), chance + Ratio, enum_weighted, shuffle, header comment: reasons for not using std DefaultPrng (no float in API)
+- **TigerBeetle stdx PRNG + VOPR swarm options** (rel 5, source-file, Apache-2.0 (code can be adapted with attribution)) https://github.com/tigerbeetle/tigerbeetle
+  - bottlenecks: C1, C12, C13
+  - Small xoshiro256++ PRNG seeded by SplitMix64 from a single u64, with no floating point in the API (integer ratios for probabilities), so draws are bit-identical across platforms. The VOPR derives ALL simulator conditions from one seed ('options_swarm'): the lift is a single scenario seed that expands into every SIH condition (noise, wind, faults) and is printed on failure.
+  - speed claim: none
+  - read: src/stdx/prng.zig at 68958eb757747d0fc96a79d1f9c2fa6766b67b48: from_seed, split_mix_64, next, chance, Ratio, shuffle, src/vopr.zig: main (seed parsing around l.127-160), options_swarm (l.379+), 'you can reproduce this failure with seed=' (l.354), docs/internals/vopr.md (seed + commit hash replay; 'V
+- **WSL2-Linux-Kernel: Hyper-V IPI hypercall path (hv_apic.c)** (rel 5, source-file, GPL-2.0 (idea only, no copying)) https://github.com/microsoft/WSL2-Linux-Kernel/blob/a989171929bed4ea681be8d77333845ce1c1732a/arch/x86/hyperv/hv_apic.c
+  - bottlenecks: P5, P1
+  - Read at commit a989171: the guest replaces the APIC send_IPI ops with hv_send_ipi*, which issue the HVCALL_SEND_IPI (or _EX) hypercall. So every cross-vCPU futex wake of an idle CPU is a hypercall plus the host-side vCPU wake; this is the mechanism behind the SIH futex_wake 19.7 percent. Cutting cross-CPU wakes (same-CPU affinity, one thread) avoids it.
+  - speed claim: none
+  - read: arch/x86/hyperv/hv_apic.c: __send_ipi_one, __send_ipi_mask, __send_ipi_mask_ex, hv_send_ipi
+- **Webots event-driven lockstep: WbControlledWorld::step / needToWait / checkIfReadRequestCompleted** (rel 5, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/control/WbControlledWorld.cpp
+  - bottlenecks: P1, P5
+  - The time master never polls or sleeps for the controller. Each controller socket's readyRead fires readRequest, which emits requestReceived; that re-enters step(), and step() runs the physics step only when needToWait() finds no synchronized controller with a pending-less request. Replace the usleep(100) actuator poll with a wake on the last required publisher (a counter or condvar signalled by the publishing side), so the SIH thread blocks exactly once per tick and wakes once. mHasWaitingStep/mIsExecutingStep coalesce re-entrant triggers into one step, and the controller's 'delay' field reports overrun.
+  - speed claim: none
+  - read: WbControlledWorld::step (lines ~196-286), WbControlledWorld::needToWait (~288-306), WbControlledWorld::triggerStepFromTimer / processWaitingStep (~152-163), WbControlledWorld::checkIfReadRequestCompleted (~173-194), WbController::readRequest (WbController.cpp ~1178-1275) and writeAnswer (~1034-1083)
+- **aerial-autonomy-stack (Panerati et al., arXiv 2602.07264) - faster-than-real-time PX4/ArduPilot SITL on Gazebo** (rel 5, paper, MIT (repo)) https://github.com/JacopoPan/aerial-autonomy-stack
+  - bottlenecks: P3, P5, P6, P2
+  - The only paper found that measures PX4 SITL speedup directly and reports what limits it (CPU bound, physics plus inter-process communication). Its result that two PX4 instances of one drone each reach 26.05x while one instance of four drones reaches 4.97x is a ready baseline for our 9x to 12x single-instance numbers and argues for many small instances over one large one (P6). Also shows a 4 ms physics step for PX4 and a deliberate cap at 15x to avoid jitter.
+  - speed claim: Abstract: 'over 20x faster-than-real-time'. Measured table (Intel i9-13, 64 GB RAM, RTX 3500 Ada, mean of 10 runs of 250 simulated s, Gazebo Harmonic, 4 ms physics step): PX4 1 drone 1 instance 10.56x; PX4 4 drones 1 instance 4.97x; PX4 2 instances x 1 drone 26.05x; ArduPilot 1 drone 8.35x; ArduPilot 2 instances 15.06x. Raw physics 15-20x, capped at 15x by the authors. Source: https://arxiv.org/html/2602.07264
+  - read: arXiv 2602.07264 HTML: benchmark table and the discussion of what limits speed, simulation/simulation_resources/scripts/gz_step.py, simulation/simulation_resources/patches/px4-v1.17.0.patch (checked: it does not touch speed or lockstep, so the speed setup lives elsewhere in the repo; not located wit
+- **clock_nanosleep with TIMER_ABSTIME (man page and pattern)** (rel 5, write-up, man-pages free docs; syscall is POSIX) https://man7.org/linux/man-pages/man2/clock_nanosleep.2.html
+  - bottlenecks: P2, P3
+  - SIH computes a relative usleep from gettimeofday each step. Absolute deadlines on CLOCK_MONOTONIC (next += step; clock_nanosleep(..., TIMER_ABSTIME, &next)) remove cumulative drift, handle EINTR by re-issuing the same request, and avoid the wall-clock jump risk of gettimeofday. With slack set to 1 this is also the lowest-jitter standard sleep. P3 'unthrottled' simply skips the call.
+  - speed claim: I did not find a published usleep vs clock_nanosleep jitter table. Gap.
+  - read: clock_nanosleep(2) NOTES on TIMER_ABSTIME and the drift pattern, cyclictest.c timerthread() for a working loop
+- **folly Baton / SaturatingSemaphore / WaitOptions / detail Futex (spin-then-futex handoff)** (rel 5, library, Apache-2.0) https://github.com/facebook/folly
+  - bottlenecks: P1, P5
+  - Baton is a one-shot post/wait handoff: post() is a single atomic op plus a futex wake only if a waiter is parked, and wait() spins briefly before blocking. It is the closest match to 'SIH thread posts, flight stack posts back'. The spin budget is a WaitOptions value (spin_max default 2 microseconds), and Spin.h gives spin_pause_until / spin_yield_until helpers. Reimplementing a 40-line version with std::atomic and a platform futex would be enough, with a sem_t fallback for NuttX.
+  - speed claim: Header says a MayBlock Baton post/wait costs a single sem_post and sem_wait in the blocking case (no timing given). No measured figure found.
+  - read: folly/synchronization/Baton.h (post, wait, try_wait_for), folly/synchronization/SaturatingSemaphore.h, folly/synchronization/WaitOptions.h (spin_max = 2 microseconds), folly/synchronization/detail/Spin.h (spin_pause_until, spin_yield_until), folly/detail/Futex.h, Futex.cpp, Futex-inl.h (futexWaitUnt
+- **folly Baton, SaturatingSemaphore, WaitOptions, detail/Spin.h** (rel 5, library, Apache-2.0) https://github.com/facebook/folly/tree/main/folly/synchronization
+  - bottlenecks: P1, P2, P5
+  - Minimal one-shot post/wait handoff: Baton does try_wait, then pause-spin bounded by WaitOptions::spin_max (default 2 us), then futex wait; post is a single atomic exchange and only calls futexWake if a waiter is parked. Direct template for replacing the usleep(100) poll and for a lockstep barrier release with a spin budget tuned to the step length.
+  - speed claim: claim in source comment (WaitOptions.h): 'On circa-2013 devbox hardware, it costs about 7 usec to FUTEX_WAIT and then be awoken. Spins on this hw take about 7 nsec, where all but 0.5 nsec is the pause instruction.' Old hardware, author's estimate, not a benchmark table.
+  - read: folly/synchronization/Baton.h: wait(), tryWaitSlow(), post(), folly/synchronization/WaitOptions.h: spin_max and the comment on spin vs FUTEX_WAIT cost, folly/synchronization/detail/Spin.h: spin_pause_until, spin_yield_until, folly/synchronization/SaturatingSemaphore.h
+- **hazrmard/multirotor (Python multicopter simulator)** (rel 5, simulator, No license file found in the repository tree and gh reports none; pyproject.toml had no licence field. Treat as no license: reimplement the equations, copy no text. The closed-form sag is standard circuit algebra.) https://github.com/hazrmard/multirotor
+  - bottlenecks: C6, C14, P7
+  - Answers the seed question: it DOES model load-dependent voltage sag. battery_terminal() solves the sag in closed form, V=(Voc+sqrt(Voc^2-4RP))/2, clamped at Voc/2 when power cannot be delivered, with an SoC to OCV table (battery_ocv) and a cutoff flag. The motor model has back-EMF, current limited by R and a maximum current, torque minus friction minus drag*w^2 over inertia. All of it is a few allocation-free scalar loops per motor, so it ports to C++ in SIH almost line for line as a per-rotor voltage, current, speed and sag model.
+  - speed claim: none
+  - read: multirotor/physics.py: battery_terminal, battery_ocv, battery_operating_point, battery_end_step, motor_electrical, motor_acc, motor_power, multirotor/simulation.py: class Battery (internal_resistance, min_voltage, cutoff), class Motor, class Propeller, scripts/benchmarks/ (the repo has benchmarks; I
+- **intrinsic-ai/icon-shared-memory (Lockstep, BinaryFutex, remote trigger)** (rel 5, library, Apache-2.0 (text can be adapted with attribution; PX4 is BSD-3)) https://github.com/intrinsic-ai/icon-shared-memory
+  - bottlenecks: P1, P2, P5, P6
+  - Its util/thread/lockstep.h is a two-party A/B alternation primitive (A, B, A, B, mutual exclusion, blocks otherwise), which is the SIH step / flight-stack-done handshake. BinaryFutex is a post/wait/close futex word with a private (single-process) mode, so a wake costs about one syscall and needs no usleep(100) poll or condvar.
+  - speed claim: none
+  - read: util/thread/lockstep.h and lockstep.cc (state machine kAFinished/kBRunning, header comment), icon/interprocess/binary_futex.h and binary_futex.cc (Post, Wait with deadline, kClosed, private_futex flag), icon/interprocess/shared_memory_lockstep/shared_memory_lockstep.h (the same lockstep in shared me
+- **madsim GlobalRng with determinism log/check** (rel 5, library, Apache-2.0) https://github.com/madsim-rs/madsim
+  - bottlenecks: C1, C13, C14
+  - Xoshiro256++ seeded from u64, plus a built-in determinism check: run 1 logs one byte per draw (mixed with sim time), run 2 re-runs and panics at the first draw that differs ('non-determinism detected at <time>'). Also patches libc getrandom/rand/time so stray entropy cannot leak in. SIH could ship the same draw-log check cheaply to prove a refactor or a thread change kept draw order, and to find any remaining wall-clock or rand() leak.
+  - speed claim: none
+  - read: madsim/src/sim/rand.rs at 519950efb4711464f300ed7edf2967ed62d5f502: GlobalRng::with (log/check), enable_log, enable_check, buggify, madsim/src/sim/runtime/mod.rs: Runtime::check_determinism (l.169-200), madsim/src/sim/time/mod.rs (simulated clock, jump-to-next-timer)
+- **microsoft/WSL issue 14526: kernel mitigations in WSL2 (mitigations=off, chrt -i 0 trick)** (rel 5, write-up, n/a (GitHub issue text)) https://github.com/microsoft/WSL/issues/14526
+  - bottlenecks: P5, P1, P2
+  - Only WSL2-specific measurement of what inflates syscall and wake/context-switch cost. Setting kernelCommandLine mitigations=off in .wslconfig is a no-PX4-change knob aimed at the 3-4x kernel-over-user ratio. A commenter reports that running the pair under SCHED_IDLE (chrt -i 0) made a two-process wake ping-pong about 20x faster; this is the cheapest experiment against futex_wake and context switches.
+  - speed claim: Quote from the issue's benchmark report (Windows 11, WSL v3.0.2, kernel 6.18.40.1-microsoft-standard-WSL2, 16 vCPUs, user tonymet, perf bench, host CPU model not stated; note the vulnerability table suggests an AMD host): syscall basic 5,353,135 ops/s (0.1868 us/op) with mitigations on vs 14,798,678 ops/s (0.0676 us/op) off; sched pipe 123,159 ops/s (8.12 us/op) on vs 217,736 ops/s (4.59 us/op) off; hackbench 'sched messaging -g 20 -l 1000' 1.682 s on vs 0.997 s off. Earlier comment on a different (older) WSL build: sched pipe 43.8 us/op on vs 39.3 us/op off (11%). Another commenter, 'perf bench sched pipe -l 100000': 5.549 s (55.5 us/op) normally vs 0.214 s (2.14 us/op) with 'chrt -i 0' in front, WSL2 version not stated. These are user-submitted figures, unverified by me. Also claim in the thread: WSL 3.x series is 5x faster than 2.x on the pipe benchmark.
+  - read: Comment with 'WSL Kernel Mitigations Performance Benchmark Report' (commands: perf bench syscall basic, sched pipe, sched messaging, futex wake -t 16 -w 1; futex result not in the report table), Comment by thisismypassport on 'chrt -i 0 perf bench sched pipe -l 100000', Kernel command line lists in 
+- **mujoco_px4_sitl (MuJoCo backend for PX4 over MAVLink HIL, lockstep)** (rel 5, simulator, BSD-3-Clause) https://github.com/WKoishi/mujoco_px4_sitl
+  - bottlenecks: C1, C2, C13, C14
+  - A small, recent, PX4-specific IMU error model that documents the design decisions SIH needs: turn-on bias drawn once per run, first-order Gauss-Markov drift, white noise scaled as density*sqrt(rate/2) (and why that differs from Gazebo's density/sqrt(dt)), quantisation to PX4's simulated FIFO LSB with saturation, and a fixed number of random draws per frame with separate streams for turn-on biases, accel and gyro so that changing one parameter does not shift the others. Directly answers C1 (stream isolation, draw-order independence) and C2 (the missing IMU error budget). Its own text notes vibration, scale factor, cross-axis and temperature are not modelled.
+  - speed claim: none
+  - read: src/mujoco_px4_sitl/sensors.py (module docstring lines 1-58, quantise at ~60, ImuSpec, _Triad.read, ImuModel.read, build_imu), src/mujoco_px4_sitl/loop.py (lockstep), scripts/fly_regression.py, IMPLEMENTATION_PLAN.md (plan section 3.4 on HIL_SENSOR having no PX4-side error)
+- **rigtorp/BinarySemaphore** (rel 5, library, MIT) https://github.com/rigtorp/BinarySemaphore
+  - bottlenecks: P1, P5
+  - Header-only binary semaphore on futex: fast path stays in user space, a syscall only when the consumer has blocked. Small enough to lift whole (MIT) as the actuator-ready flag between the work-queue thread and SIH thread, or as the barrier release in lockstep_components.
+  - speed claim: none
+  - read: BinarySemaphore.h: acquire(), release()
+- **rt-tests / cyclictest** (rel 5, tool, GPL-2.0 (reimplement idea, copy no text)) https://git.kernel.org/pub/scm/utils/rt-tests/rt-tests.git
+  - bottlenecks: P2, P1, C14
+  - The standard wake-up latency measurement. timerthread() shows the three timer modes side by side (clock_nanosleep with TIMER_ABSTIME, relative nanosleep, and timer_create with SIGEV_THREAD_ID) so we can measure usleep overshoot on the exact box and pick the best one. set_latency_target() holds /dev/cpu_dma_latency open to stop deep C-states, another cheap wake-latency lever. Use as a measuring tool and pattern, not as copied code.
+  - speed claim: none
+  - read: src/cyclictest/cyclictest.c: timerthread() (around lines 787-950), set_latency_target() (around line 262), clock_nanosleep wrapper (line 66), README.markdown
+- **AFL / AFL++ forkserver and persistent mode** (rel 4, tool, AFL Apache-2.0; AFL++ is listed by GitHub as AGPL-3.0, read its LICENSE before any copy) https://github.com/google/AFL
+  - bottlenecks: P4, P6
+  - Pays process start and initialisation once, then forks a child per run from a parked parent; deferred forkserver (__AFL_INIT) parks after expensive setup. Maps to booting PX4 once to the ready state and forking per scenario, in a test harness (not the default path). Caveat: PX4 is multi-threaded, so fork only carries the calling thread; this is untested.
+  - speed claim: none
+  - read: llvm_mode/afl-llvm-rt.o.c (__afl_start_forkserver, deferred init), docs/technical_details.txt (fork server section), AFLplusplus/AFLplusplus: docs/ and instrumentation/afl-compiler-rt.o.c (persistent mode)
+- **AFL++ forkserver and persistent mode** (rel 4, tool, AGPL-3.0: idea only, no text may be copied) https://github.com/AFLplusplus/AFLplusplus
+  - bottlenecks: P4, P6
+  - Canonical fork server (fork after init, child per run, COW) and persistent mode (loop in-process, reset state yourself, restart every N iterations to bound drift). Docs spell out why threads break it: create no vital threads, timers, temp files or sockets before the fork point. Persistent mode is the right model if SIH ever supports in-place reset instead of restart; the 'restart after N loops to limit leaks' rule is a good guard.
+  - speed claim: Claim (README): 'the speed increase is usually x10 to x20' for persistent mode over plain fork per run; fuzzing workloads, hardware not stated. instrumentation/README.persistent_mode.md.
+  - read: instrumentation/README.persistent_mode.md (sections Deferred initialization lines ~81-110, persistent loop, shared-memory input), instrumentation/afl-compiler-rt.o.c: __afl_start_forkserver, __afl_manual_init, __afl_persistent_loop, src/afl-forkserver.c (controller side protocol), docs/fuzzing_in_de
+- **Achieving Predictable Multicore Execution of Automotive Applications Using the LET Paradigm (RTAS 2018)** (rel 4, paper, ) https://doi.org/10.1109/rtas.2018.00032
+  - bottlenecks: P1, P5, C14
+  - Shows LET applied to multicore AUTOSAR, where buffers are copied at fixed instants so tasks run concurrently with no handshake. Maps onto SIH producing actuator-in and sensor-out at fixed tick boundaries. Cited 64 times (Crossref).
+  - speed claim: none
+  - read: Sections on LET communication and buffer copy at period boundaries
+- **Aerial Gym Simulator (NTNU-ARL)** (rel 4, simulator, BSD-3-Clause) https://github.com/ntnu-arl/aerial_gym_simulator
+  - bottlenecks: C2, C6, C7, C8, C14
+  - Isaac Gym based, tensor-batched multirotor sim with config-driven per-motor model (first-order response with separate increasing/decreasing time constants, randomized thrust constants min/max), arbitrary motor counts (N-rotor, force applied at motor link or root link), random-robot config with disturbance probability and bounded force/torque, and IMU with bias random walk, white noise, init bias range and measurement clipping. Config layout is a good catalog for the C12 variable list.
+  - speed claim: measured per paper: 'over 3.8 x 10^6 steps per second' aggregate, 2^17 robots, 2x RTX 3090 and Threadripper PRO 3975WX, each step 10 ms of simulated time (2023 arXiv 2305.16510, via search summary, not opened directly). 2025 paper (arXiv 2503.01471 HTML, Section IV, Table I) physics 4.43 x10^6 SPS at 2^16 instances on RTX 3090, 'constant RPM setpoints in obstacle-free environments'; extracted table alignment was ambiguous for some rows.
+  - read: aerial_gym/control/motor_model.py, aerial_gym/config/robot_config/base_random_config.py (disturbance, motor_model_config), aerial_gym/config/sensor_config/imu_config/base_imu_config.py (bias_std, imu_noise_std, max_measurement_value, max_bias_init_value), aerial_gym/robots/base_multirotor.py, aerial
+- **Aerialist (UAV test bench for PX4)** (rel 4, tool, MIT) https://github.com/skhatiri/Aerialist
+  - bottlenecks: P4, P6, C7, C11, C12
+  - A declarative test description (configs, timestamped commands, environment incl. wind with gust start/duration/variance, expectations) executed by local, docker or Kubernetes agents, with a Monitor and an Analyst that parses ULog. The test-description schema is a good model for SIH scenario files; k8s_agent/docker_agent show how it fans out parallel runs. It is built around Gazebo/jMAVSim, so the runner side is the lift, not the sim.
+  - speed claim: none
+  - read: docs/architecture.md (Test Description, Generator, Commander, Monitor, Analyst), aerialist/px4/wind.py (wind with gust fields), aerialist/px4/aerialist_test.py, aerialist/px4/k8s_agent.py, docker_agent.py, local_agent.py, aerialist/px4/trajectory_utils.py (trajectory distance metrics), samples/tests
+- **Aeron (IPC publication, idle strategies, broadcast buffer)** (rel 4, library, Apache-2.0) https://github.com/aeron-io/aeron
+  - bottlenecks: P1, P2, P5
+  - BackoffIdleStrategy is a ready-made spin, then yield, then exponentially growing park ladder with a reset on work. It is the standard fix for a bare usleep(100) poll: spin briefly for the common microsecond case, then back off to save CPU on 54 boards or crowded CI hosts. The C broadcast transmitter/receiver is a one-writer, many-reader, never-blocking overwrite buffer where slow receivers detect they were lapped, matching uORB topic semantics. Lock-free IPC log buffers (term buffers) are a design reference.
+  - speed claim: none
+  - read: aeron-client/src/main/cpp_wrapper/concurrent/BackOffIdleStrategy.h (class BackoffIdleStrategy; opened, 4-state ladder, defaults 10 spins, 20 yields, park 1 us to 1 ms), aeron-client/src/main/c/concurrent/aeron_broadcast_transmitter.c and aeron_broadcast_receiver.c, aeron_broadcast_descriptor.h, aero
+- **Agrona IdleStrategy implementations** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/aeron-io/agrona/tree/ea35cc386ab96b1db8c4caa798dc680a25ff2cd3/agrona/src/main/java/org/agrona/concurrent
+  - bottlenecks: P1, P2
+  - Reference Java source for the same policy family (Backoff, BusySpin, Yielding, Sleeping, SleepingMillis, NoOp, Controllable). Documents the defaults: 10 spins, 5 yields, park 1 us to 1 ms (read from source). A clean statement of the escalation contract.
+  - speed claim: none
+  - read: BackoffIdleStrategy.java (DEFAULT_MAX_SPINS=10, DEFAULT_MAX_YIELDS=5, DEFAULT_MIN_PARK_PERIOD_NS=1000, DEFAULT_MAX_PARK_PERIOD_NS=1_000_000), ControllableIdleStrategy.java, IdleStrategy.java
+- **Apollo Cyber RT** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/ApolloAuto/apollo
+  - bottlenecks: P1, P3, P5, P8
+  - Several things in one tree: (1) cyber/base/wait_strategy.h gives Block, Sleep, Yield, BusySpin and TimeoutBlock waiters behind one interface, a drop-in way to make the P1 wait pluggable; (2) cyber/time/clock.h has a mock-clock mode driven by SetNow(), i.e. an externally advanced simulated clock shared by every module (compare to SIH owning the clock); (3) cyber/timer/timing_wheel.h is a hashed timing wheel, an alternative to PX4's linear list of timed waits that is scanned on every set_absolute_time (P5); (4) cyber/data/data_visitor.h, data_notifier.h and channel_buffer.h implement notify-on-data-ready with a bounded cache and message fusion; (5) cyber/transport/shm has a segment/block/readable_info/condition_notifier design (shared-memory blocks plus a notifier) comparable to Fast DDS data sharing.
+  - speed claim: none
+  - read: cyber/base/wait_strategy.h, cyber/time/clock.h and clock.cc (MODE_MOCK, SetNow), cyber/timer/timing_wheel.h/.cc, cyber/data/data_notifier.h, data_visitor.h, channel_buffer.h, cache_buffer.h, cyber/transport/shm/segment.cc, block.h, condition_notifier.cc, cyber/scheduler/policy/scheduler_choreography
+- **Apollo Cyber RT scheduler (choreography, classic, coroutines)** (rel 4, runner-or-infrastructure, Apache-2.0 (confirmed via gh repo view). Can adapt with attribution.) https://github.com/ApolloAuto/apollo/tree/master/cyber/scheduler
+  - bottlenecks: P5
+  - Pinned processor threads, per-group notify_one instead of notify_all, and user-space coroutines (croutine) that avoid kernel thread wake-ups. The coroutine and pinning pattern could cut SIH's cross-thread wake-ups per tick. Whether it could be adapted to PX4's work queues is untested.
+  - speed claim: none
+  - read: cyber/scheduler/policy/scheduler_choreography.cc (SetSchedAffinity, NotifyProcessor at about line 230), cyber/scheduler/policy/classic_context.cc (Wait/Notify with condition_variable wait_for and notify_one, lines 75-96), cyber/scheduler/processor.cc, cyber/croutine/croutine.cc and cyber/croutine/de
+- **ArduPilot Aircraft::sync_frame_time (sleep-debt pacing)** (rel 4, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/SITL/SIM_Aircraft.cpp
+  - bottlenecks: P2, P3
+  - Pacing with an accumulated sleep debt: sleep only when debt exceeds min_sleep_time, cap negative debt at -100 ms so a slow stretch is not repaid by a burst, subtract the actual slept time, and compute achieved rate over a ~10 ms wall window. Replaces a usleep per step (including usleep(0)) with batched sleeps, and speedup <= 0 or very large simply never accrues debt. Reimplement only (GPLv3).
+  - speed claim: none
+  - read: libraries/SITL/SIM_Aircraft.cpp: Aircraft::time_advance (261), sync_frame_time (297), setup_frame_time (275), get_wall_time_us (664), set_speedup (689)
+- **ArduPilot IMU error model in SITL (AP_InertialSensor_SITL generate_accel/generate_gyro)** (rel 4, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/AP_InertialSensor/AP_InertialSensor_SITL.cpp
+  - bottlenecks: C2, C14
+  - The concrete catalogue for C2. Per instance: scale (accel divided by SIMn_ACCn_SCAL per axis), additive bias (ACCn_BIAS, GYRn_BIAS), white noise (ACCn_RND, GYRn_RND, noise_variation jitter), static sinusoidal vibration per axis (VIB_FREQ), RPM-scaled motor-harmonic vibration (VIB_MOT_MAX/MULT/HMNC/MASK using motor RPM), stuck-at failure (ACCELn_FAIL value, GYR_FAIL_MSK, ACC_FAIL_MSK), temperature drift (IMUT_START/END/TCONST/FIXED), board mounting (IMU_ORIENT, IMU_POS), and file record/replay of raw samples (GYR_FILE_RW, ACC_FILE_RW). Note the design choice: errors are applied in the sensor backend, not in the rigid-body model, so physics stays clean. Reimplement the list, not the text (GPLv3).
+  - speed claim: none
+  - read: libraries/AP_InertialSensor/AP_InertialSensor_SITL.cpp: generate_accel (73-210), generate_gyro (213-), get_temperature (48), calculate_noise (45), libraries/SITL/SITL.cpp: AP_GROUPINFO table (IMUT_*, ACCn_*, GYRn_*, VIB_*, GYR_FILE_RW)
+- **ArduPilot SITL HAL scheduler (AP_HAL_SITL Scheduler.cpp / SITL_State.cpp)** (rel 4, source-file, GPL-3.0 (not confirmed from the file). Reimplement ideas only, do not copy text.) https://github.com/ArduPilot/ardupilot/tree/master/libraries/AP_HAL_SITL
+  - bottlenecks: P1, P2, P3, P8, P5
+  - Opened the source. The closest flight-stack analogue of an RTOS-host port, and it has the same P1 shape: only the main thread advances simulated time (SITL_State::wait_clock loops on micros64() and calls _fdm_input_step); every other thread busy-waits with usleep(10), with the comment that a 10us wall sleep at 30x speedup equals 300us of simulated time. Timer and IO callbacks are run 'pretending to be' those threads from the main thread (timer_event, _run_io_procs from stop_clock). Scheduler::semaphore_wait_hack_required is a documented fix for exactly the P8 failure: a timed semaphore wait on a stopped clock never times out because time does not advance, so the main thread is allowed to advance it. That is the logger-lockstep freeze pattern. It also throttles the output queue at speedup > 1 so slow consumers do not skew time.
+  - speed claim: none
+  - read: libraries/AP_HAL_SITL/SITL_State.cpp: wait_clock (lines ~133-188), libraries/AP_HAL_SITL/Scheduler.cpp: semaphore_wait_hack_required, delay_microseconds, stop_clock, timer_event, sitl_begin_atomic, libraries/AP_HAL_SITL/Scheduler.cpp: _run_io_procs
+- **ArduPilot SITL motor model (SIM_Motor.cpp) and per-motor frame JSON (SIM_Frame.cpp)** (rel 4, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/SITL/SIM_Motor.cpp
+  - bottlenecks: C6, C7
+  - Per-motor actuator-disc momentum thrust: thrust = 0.5*rho*A*(v_out^2 - v_in^2), v_out = voltage_scale*v_max*sqrt((1-expo)*cmd + expo*cmd^2), where v_in is axial inflow from air velocity plus rotation about the CG, so thrust drops with climb speed and varies with density; slew limiter on command, battery-dead cutoff, yaw torque from thrust, tilt of thrust vector per motor, variable-pitch rotor path. Frame model: 32-motor tables, JSON model files (mass, diagonal_size, refSpd, refAngle, refVoltage, refCurrent, hoverThrOut, propExpo, spin_min/max, slew_max, moment_inertia, per-motor position, thrust vector and yaw factor), with derived coefficients computed from reference hover data in Frame::update_parameters, and mass scale (SIM_FRM_) plus SIM_ENGINE_FAIL mask and SIM_ENGINE_MUL for per-motor loss. A ready template for a generic N-rotor, parameterised vehicle (C7) that stays small. GPLv3: reimplement.
+  - speed claim: none
+  - read: libraries/SITL/SIM_Motor.cpp: calculate_forces (25-150), calc_thrust (233), pwm_to_command (222), setup_params (184), libraries/SITL/SIM_Frame.cpp: model JSON loader load_frame_params (614-722) with schema keys, update_parameters (772-830) deriving disc area / power factor / inertia from hover data,
+- **ArduPilot SITL.cpp parameter catalogue (SIM_ parameter table)** (rel 4, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/SITL/SITL.cpp
+  - bottlenecks: C1, C2, C3, C4, C6, C8, C10, C12, C14
+  - The owner's 185-item list as a design reference, extracted from the AP_GROUPINFO table. Beyond the named ones it includes: LOOP_DELAY and TIME_JITTER (C14), RATE_HZ, IMU_COUNT and BARO_COUNT (redundant sensors), UART_LOSS, BAUDLIMIT_EN, FLOW_DELAY/FLOW_RND, MAG_RND/MAG_MOT/MAG_DELAY/MAG_ALY (mag anomaly), MAGn_OFS/DIA/ODI/SCALING/ORIENT/FAIL (soft and hard iron, per-mag failure), SONAR_RND/GLITCH/SCALE (range), GND_BEHAV (ground contact), DRIFT_SPEED/DRIFT_TIME (GPS drift), TEMP_START/TEMP_BRD_OFF/TEMP_TCONST/TEMP_BFACTOR, WAVE_* and TIDE_* (water), INIT_*_OFS, OPOS_* (origin), THML_SCENARI (thermals), SPEEDUP, FLOAT_EXCEPT, RC_FAIL, ESC_TELEM. I did not extract the descriptions or ranges; the file has them as @Description comments before each entry. Use as the checklist for the C items and for how to group them in a flat name space (SIM_<SENSOR><n>_<EFFECT>). Reimplement the list, copy no text.
+  - speed claim: none
+  - read: libraries/SITL/SITL.cpp: var_info[] and the second var_info tables (IMU/mag parameters are in later tables), libraries/SITL/SITL.h: struct and member types, shove/twist structs, https://github.com/ArduPilot/ParameterRepository for the generated per-version parameter lists
+- **ArduPilot Tools/Replay (Replay tool, check_replay.py, check_replay_branch.py)** (rel 4, tool, GPL-3.0 (ArduPilot). Reimplement the idea only; do not copy text.) https://github.com/ArduPilot/ardupilot/tree/master/Tools/Replay
+  - bottlenecks: C13
+  - Another autopilot's version of the same problem, with a stricter check. Replay re-runs the estimator on a logged flight and writes its output in the same log under a core id offset by 100. check_replay.py then requires every field of every message to be exactly equal, with an optional percent tolerance and an ignore set. check_replay_branch.py builds master, makes a replay log, checks out a branch, rebuilds, replays and compares, which is a branch-vs-baseline A/B for 'did my change alter behaviour'. The same-log-with-offset-ids trick and the exact-equality-first rule can be lifted for SIH golden traces. Only the idea can be lifted into BSD code.
+  - speed claim: none
+  - read: Tools/Replay/check_replay.py: check_log (exact equality loop, accuracy margin, ignores), Tools/Replay/check_replay_branch.py: CheckReplayBranch (master log, then branch, then compare), Tools/Replay/Replay.cpp, LogReader.cpp
+- **ArduPilot autotest framework (vehicle_test_suite.py, autotest.py, sim_vehicle.py)** (rel 4, source-file, GPL-3.0 (reimplement ideas only, no text copy)) https://github.com/ArduPilot/ardupilot/tree/master/Tools/autotest
+  - bottlenecks: P3, P4, P6, C10, C11, C13
+  - Mature scenario/test layer: context_push/context_pop restores parameters, message rates and speedup after each test; context_set_speedup keeps SIM_SPEEDUP and the test's timeout scaling in sync (the P3 timeout problem solved on the test side); SITL 'reboot' execs its own command line so no rebuild or new process per test; --replay builds the Replay tool to re-run EKF from logs; sim_vehicle.py gives each instance its own dir and port offset (-I). Pinned commit b7c08d4dbc69f58f5636642698b63a9130725db6.
+  - speed claim: Default autotest speedup is 100 (vehicle_test_suite.py default_speedup returns 100, read in source). No measured throughput found.
+  - read: Tools/autotest/vehicle_test_suite.py: context_push (~7139), set_parameters (~6838), context_set_speedup (~4089), default_speedup (~2259, returns 100), reboot_sitl_before_test (~2651), reboot_sitl_or_reset (~2635), install_message_hook (~5464), run_replay (~16502), Tools/autotest/autotest.py: --speed
+- **ArduPilot autotest harness: vehicle_test_suite.py (context push/pop, set_parameters, sim-time waits, message hooks)** (rel 4, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/Tools/autotest/vehicle_test_suite.py
+  - bottlenecks: C11, C13, P4, P6
+  - Scenario and failure-injection layer in Python over MAVLink: context_push/context_pop snapshot and restore parameters (and files, speedup, message hooks) so a test cannot leak state; set_parameters injects SIM_ conditions mid-flight; waits are in simulated time (get_sim_time, delay_sim_time); install_message_hook and context_collect gather telemetry; assert_* helpers and NotAchievedException give pass/fail with a status; run_one_test_attempt wraps retries and per-test logs; context_set_speedup keeps timeouts consistent with the speed factor; reboot_sitl restarts between tests. Test format is Python methods, not data, so assertions are not directly reusable as a file format; the structure is: arrange (params) / act (command, wait in sim time) / assert (telemetry bounds) / restore. Ideas lift; GPLv3 forbids copying text.
+  - speed claim: none
+  - read: Tools/autotest/vehicle_test_suite.py: context_push (7139), context_pop (7388), context_set_speedup (4089), run_one_test_attempt (10238), reboot_sitl (2612), delay_sim_time (8205), install_message_hook (5464), assert_receive_message (5662), Tools/autotest/arducopter.py: motor-failure loiter test arou
+- **Avis in-situ model checker (obicons/avis) and libhinj** (rel 4, tool, MIT (avis, libhinj); PX4Libhinj BSD-3-Clause; ArdupilotLibhinj GPL-3.0) https://github.com/obicons/avis
+  - bottlenecks: C11, C3, P8, C12, C13
+  - Injects sensor failures at operating-mode transitions of PX4/ArduPilot SITL, detects liveness and freefall violations by comparing position, acceleration and mode against profiling runs, and reports unsafe scenarios. libhinj is a tiny C hook library that lets firmware ask a controller whether a sensor read should fail. Direct template for a failure schedule and a pass/fail detector (and for the P8 IMU-failure case).
+  - speed claim: Paper claim: 'Avis found unsafe conditions 2.4X faster than Bayesian Fault Injection' with 2-hour budget per workload; 'Random fault injection must run for nearly 10 hours to achieve a 98% certainty' for the landing IMU case (arXiv 2106.14959; hardware not identified in the passages read).
+  - read: libhinj/libhinj.c, libhinj.h, hinj/server.go, hinj/reader.go, detector/deviant.go, freefall.go, position.go, timeout.go, executor/executor.go, platforms/px4.go, obicons/PX4Libhinj (diff against PX4 for the hook sites), paper arXiv 2106.14959 Sec on SABRE schedule and state comparison (P, acceleratio
+- **CHOPtrey: contextual online polynomial extrapolation for multi-core co-simulation** (rel 4, paper, ) https://arxiv.org/abs/1610.09261
+  - bottlenecks: P1, P5, C14
+  - Slackened synchronization between parallel sub-models adds integration error. CHOPtrey extrapolates the delayed input online from context. Directly applicable if SIH wants to predict the delayed actuator command instead of just holding it.
+  - speed claim: none
+  - read: Method section on context-based polynomial order choice, Evaluation section (only the abstract was read)
+- **CORE-MATH (correctly rounded libm functions)** (rel 4, library, MIT (LICENSE read at gitlab.inria.fr/core-math/core-math)) https://core-math.gitlabpages.inria.fr/
+  - bottlenecks: P7, C13
+  - Single-precision correctly-rounded sinf/cosf/atan2f/expf etc. give identical bits on every platform and libc, and are written for speed; a candidate for SIH's ECEF/LLA and quaternion trig (P7) where speed and a golden trace both matter. The project page shows cycle counts on an Intel Xeon Silver 4214 with GCC 15.2.0 against glibc, but I did not read the figures.
+  - speed claim: none
+  - read: src/binary32/ (sinf, cosf, atan2f, sqrtf variants), project page 'quality' and 'worst cases'
+- **CRIU (Checkpoint/Restore In Userspace)** (rel 4, tool, GPL-2.0 (lib/ is LGPL-2.1); idea-only, no text copy. Run as an external tool it adds no dependency to SIH.) https://github.com/checkpoint-restore/criu
+  - bottlenecks: P4, P6, C1
+  - Dumps a whole multithreaded process tree (threads, memory, fds) to image files and restores it, so 'boot + param import + EKF convergence' can be paid once and every run starts from the image. Needs no change to SIH or the flight stack, so integrity is untouched. Open problems for PX4: UDP/MAVLink sockets, /tmp lock files, PID must be free, CAP_CHECKPOINT_RESTORE, and whether WSL2's kernel has the needed options (not checked).
+  - speed claim: none
+  - read: criu/pstree.c (thread/process tree), criu/mem.c and criu/page-pipe.c (page dump), criu/uffd.c (lazy-pages restore), compel/src/lib/infect.c (parasite injection to seize threads), criu.org/Lazy_migration, criu.org/Incremental_dumps, criu.org/Memory_changes_tracking, criu.org/Parasite_code, images/pst
+- **Chrono ChRealtimeStepTimer** (rel 4, physics-engine, BSD-3-Clause (copyable with attribution)) https://github.com/projectchrono/chrono
+  - bottlenecks: P2, P1
+  - Eleven-line pacing primitive: Spin(step) busy-waits until wall time reaches the step size, then resets the timer. A spin-wait pacer avoids the usleep granularity cost in SIH's per-step usleep(sleep_time) and usleep(100) polling. Needs a hybrid (sleep most, spin the tail) to avoid pegging a core on small machines.
+  - speed claim: none
+  - read: src/chrono/core/ChRealtimeStep.h (ChRealtimeStepTimer::Spin), src/chrono/physics/ChSystem.cpp (DoStepDynamics), src/chrono/timestepper/ChTimestepper.h
+- **Co-simulation: State of the Art (Gomes et al.)** (rel 4, paper, ) https://arxiv.org/abs/1702.00686
+  - bottlenecks: P1, C14
+  - Read via ar5iv, partly (first 100k of 314k characters). Section 4.2 says Algorithm 3 'represents the Jacobi communication approach': units exchange at t then advance independently. It lists input extrapolation in order: constant (zero-order hold), linear, polynomial, extrapolated-interpolation, context-aware, estimated dead-reckoning model. Section 3.3.1 covers optimistic orchestration and rollback depth. Use as the map of delay-compensation techniques.
+  - speed claim: none
+  - read: Section 4.2 CT co-simulation orchestration, Eq 18-20, Algorithm 3, Section 4.3.2 (not read, algebraic loops and m = H/h), Section 3.3.1 causality, Reference list items [49] [50] [134] [221] [43] (extrapolation methods) and Busch 2016, Schweizer 2016, Andersson 2016
+- **Conyers, Empirical Evaluation of Ground, Ceiling, and Wall Effect for Small-Scale Rotorcraft (Univ. of Denver PhD, 2019)** (rel 4, paper, Paper; the equations can be reimplemented) https://digitalcommons.du.edu/etd/1570
+  - bottlenecks: C6, C7, C9
+  - The source of the parametric multirotor-specific ground-effect model that AirSim-GE implements. It also has ceiling-effect findings (classical helicopter theory is adequate) and a wall-effect treatment, so one document covers ground, ceiling and wall proximity as thrust multipliers. I did not open the full text, so the equations and fit constants are still to be read.
+  - speed claim: none
+  - read: Full thesis PDF at the digitalcommons page: the parametric ground-effect chapter, the ceiling chapter, the wall chapter
+- **DMTCP (Distributed MultiThreaded CheckPointing)** (rel 4, tool, LGPL-3.0-or-later (COPYING); reimplement or link-only, no text copy into BSD-3 tree) https://github.com/dmtcp/dmtcp
+  - bottlenecks: P4, P6
+  - Userspace, no root, no kernel changes. Preloaded library adds a checkpoint thread that signals every user thread to park (stopthisthread), writes memory, and on restart re-creates threads. This is the clearest worked example of quiescing a multithreaded process, which is what a PX4 fork server or snapshot needs. Works through LD_PRELOAD on the px4 binary.
+  - speed claim: none
+  - read: src/threadlist.cpp (checkpointhread, stopthisthread, ThreadList::resetOnFork, writeCkpt), src/threadsync.cpp and threadsync.h (checkpoint/user-thread locks), src/mtcp/mtcp_restart.c (restart without libc), src/dmtcpworker.cpp
+- **EKF2 SensorSimulator (single-threaded deterministic stepping harness)** (rel 4, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/ekf2/test/sensor_simulator/sensor_simulator.cpp
+  - bottlenecks: P5, P4, C13, C14
+  - Run-to-completion pattern: no threads, no uORB and no sleeps. A 1 ms loop calls each sensor generator's should_send(time) and then ekf->update(), so every step is fully ordered. It gives a model for a SIH 'inline' mode that calls the consumer directly each tick, instead of a wake-up per module. Per-sensor rate and delay objects are a template for C3/C14.
+  - speed claim: none
+  - read: SensorSimulator::runMicroseconds (the for loop advancing _time by 1000 us, calling _ekf->update()), SensorSimulator::runReplayMicroseconds and setSensorDataFromReplayData, sensor_simulator/createSensorDataFile.py (ULog to replay CSV), sensor_simulator/sensor.h and imu.cpp (rate and should_send logic
+- **Eli Bendersky: Measuring context switching and memory overheads for Linux threads (2018)** (rel 4, write-up, Blog text unlicensed; repo license not checked (the blog's code-for-blog repo is public domain by the author's convention, unverified)) https://eli.thegreenplace.net/2018/measuring-context-switching-and-memory-overheads-for-linux-threads/
+  - bottlenecks: P5
+  - The only same-core versus cross-core handoff measurement I found, with runnable code (pipe ping-pong and condvar ping-pong). It is bare metal, not WSL2. The same programs could be run unmodified inside WSL2 under taskset to get the missing number: handoff cost with all threads on one vCPU versus spread.
+  - speed claim: QUOTED from the page: pinned to one core with taskset, 'somewhere between 1.2 and 1.5 microseconds per context switch'; not pinned, ~2.2 microseconds. Hardware: Haswell i7-4771 (a low-end Xeon was 50-75% slower). Measured: pipe ping-pong and condition-variable signalling, direct cost only. Bare metal, not a VM.
+  - read: https://github.com/eliben/code-for-blog/tree/main/2018/threadoverhead: thread-switch-pipe.c, thread-switch-condvar.c, thread-pipe-msgpersec.c, Makefile
+- **EnvPool (ActionBufferQueue / StateBufferQueue)** (rel 4, runner-or-infrastructure, Apache-2.0 (adaptable with attribution)) https://github.com/sail-sg/envpool
+  - bottlenecks: P1, P5, P6
+  - ActionBufferQueue is a small ring buffer driven by two atomic counters and moodycamel LightweightSemaphores (spin, then futex sleep). StateBufferQueue is a lock-free circular buffer of pre-sized blocks that workers write into directly, so there are no copies and no per-result wakeups. The wake-up and hand-off pattern could replace a poll-and-usleep wait on the flight-stack side in SIH. Be aware that it is a thread-pool design, so it fits fewer wake-ups per tick only if the pool is sized to cores.
+  - speed claim: Claim in the paper abstract (arXiv 2206.10558), opened via WebFetch: 'one million frames per second' on Atari and 'three million frames per second' on MuJoCo on an NVIDIA DGX-A100; on a laptop '2.8x that of the Python subprocess'. This is a throughput claim for many envs, not single-env latency.
+  - read: envpool/core/action_buffer_queue.h (EnqueueBulk, Dequeue; read fully, about 70 lines), envpool/core/state_buffer_queue.h, envpool/core/async_envpool.h, arXiv 2206.10558 appendix D.2 (queue design)
+- **Event-Driven Simulation for Rapid Iterative Development of Distributed Space Flight Software (Bell, D'Amico, arXiv 2505.12502)** (rel 4, paper, No code repository found on the paper page) https://arxiv.org/abs/2505.12502
+  - bottlenecks: P5, P2, P3, C11, C14
+  - Runs compiled flight-software binaries in one OS process under a simulated scheduler with hybrid continuous and discrete-event time; same run gives the same execution order, faster than real time. That is the run-to-completion and 'what a time master should wait on' idea applied to flight software: the master advances to the next event instead of polling. The abstract mentions modelling scheduling, I/O and memory use. Mechanism details were not on the abstract page; read the PDF.
+  - speed claim: none
+  - read: https://arxiv.org/pdf/2505.12502 sections on the application-layer virtualization and the scheduler
+- **F Prime (nasa/fprime): ActiveRateGroup / PassiveRateGroup / RateGroupDriver** (rel 4, library, Apache-2.0 (confirmed with gh)) https://github.com/nasa/fprime
+  - bottlenecks: P5, P1, C14
+  - The rate-group pattern is a fixed-order synchronous call chain from one tick. A driver divides a base tick by per-port divisors and offsets (lcm rollover), and the group calls its member ports in port-index order with a per-port context value. This is the direct opposite of PX4's many wake-ups per tick. A SIH 'tick' could call estimator, controller, allocator and sensors in a fixed order on one thread. The cycle-slip counter, set by a lock-free flag and checked after the cycle, is a cheap overrun detector.
+  - speed claim: none
+  - read: Svc/RateGroupDriver/RateGroupDriver.cpp: CycleIn_handler (divisor/offset), configure (lcm rollover), Svc/PassiveRateGroup/PassiveRateGroup.cpp: CycleIn_handler (ordered loop over RateGroupMemberOut ports, injectable Os::RawTimeSource), Svc/ActiveRateGroup/ActiveRateGroup.cpp: CycleIn_preMsgHook / Cy
+- **FUTEX_SWAP / wake_up_swap (Oskolkov 2020 LKML series, never merged)** (rel 4, source-file, GPL-2.0 (Linux kernel). Reimplement the idea only; do not copy text.) https://lkml.iu.edu/hypermail/linux/kernel/2008.0/01995.html
+  - bottlenecks: P5, P1
+  - One syscall that wakes T2 and sleeps T1, with the wakee migrated to the waker's CPU. That is the lockstep ping-pong between the SIH thread and the work-queue threads. It needs a patched kernel, so for SIH it is a design reference. The same effect is reachable without patches by pinning both threads to one CPU (see the affinity entries) or by waking through a pipe or eventfd (WF_SYNC).
+  - speed claim: CLAIM: the cover text says the combined wake-then-wait step 'runs 5-10 times faster' than separate futex wake and wait. No absolute microseconds and no hardware were given on the pages I opened (v2 cover letter and v2 patch 1/4). The patch 4 benchmark results were not on those pages. Source: https://lkml.iu.edu/hypermail/linux/kernel/2008.0/01995.html
+  - read: v2 patch 1/4 commit message: use cases and reasoning (https://lkml.iu.edu/hypermail/linux/kernel/2008.0/01995.html), v2 diffstat: kernel/futex.c (+86), kernel/sched/core.c, kernel/sched/fair.c, include/linux/sched.h, tools/testing/selftests/futex/, patch 2/4 'futex/sched: add wake_up_swap' (renamed 
+- **Factorio desync detection (Friday Facts #47 and #55)** (rel 4, write-up, N/A (blog)) https://factorio.com/blog/post/fff-55
+  - bottlenecks: C13
+  - Two-tier scheme: an incomplete but very fast CRC heuristic every tick in normal play, and a full-state CRC every tick (plus readable-tag save diff at the first divergent tick) when debugging. Maps to SIH: a cheap rolling hash of a few state fields every step in CI, full dump only on mismatch; first divergent tick is usually one variable.
+  - speed claim: none
+  - read: https://factorio.com/blog/post/fff-47 (CRC fun), https://factorio.com/blog/post/fff-55 (MP preview, heuristic vs full CRC)
+- **Firecracker snapshotting (MAP_PRIVATE memory file, UFFD handler, diff snapshots, entropy-for-clones)** (rel 4, runner-or-infrastructure, Apache-2.0 (attribution allowed)) https://github.com/firecracker-microvm/firecracker
+  - bottlenecks: P4, P6, C1, C13
+  - Best-documented design for N clones from one snapshot: guest memory file mapped MAP_PRIVATE so each clone gets copy-on-write for free, optional userfaultfd handler for on-demand pages, diff snapshots with dirty-page tracking. The 'Entropy for Clones' doc is the checklist for what goes stale after restore (RNG state, clocks, network), directly relevant to C1: a restored SIH must reseed its random stream per clone. A VM is too heavy to embed but the CoW memory-file trick works for a process snapshot too.
+  - speed claim: No official restore-time figure found. A personal blog reports 3-5 ms restore but cites no benchmark run, so not used.
+  - read: docs/snapshotting/snapshot-support.md (MAP_PRIVATE mapping, diff snapshots, limitations), docs/snapshotting/handling-page-faults-on-snapshot-resume.md (UFFD protocol), docs/snapshotting/random-for-clones.md (what stale state to reseed after restore), tests/integration_tests/performance/test_snapshot
+- **Floating Point Determinism (Glenn Fiedler)** (rel 4, write-up, web article; ideas only) https://gafferongames.com/post/floating_point_determinism/
+  - bottlenecks: C13, P7, C1
+  - Checklist for bit-exact repeatability: fused multiply-add differences, x87 against SSE, transcendental functions differing across libm, compiler flags. Needed for golden traces and state hashes: SIH calls double cbrt, atan2, sin, cos each step, so a hash would differ across glibc versions or -ffast-math.
+  - speed claim: none
+  - read: whole article; the summary and the section on fused multiply-add and transcendental instructions
+- **FoundationDB DeterministicRandom + BUGGIFY + simulation** (rel 4, simulator, Apache-2.0) https://github.com/apple/foundationdb/blob/7e7611f8270952a2b1cffd75aa523c4b057afd62/flow/include/flow/DeterministicRandom.h
+  - bottlenecks: C1, C11, C12, C14
+  - The origin of the idea: one seeded generator for everything simulated plus a separate nondeterministicRandom for the rest; BUGGIFY sites are enabled per run once, then fire at a set probability; the simulator picks random knob values per seed. For SIH it suggests a 'chaos' flag per failure site, decided from the seed, in the production binary but inert by default.
+  - speed claim: none
+  - read: flow/DeterministicRandom.cpp (boost mt19937_64, random01/randomInt, resetSeed), flow/include/flow/Buggify.h (BUGGIFY, BUGGIFY_WITH_PROB), fdbrpc/sim2.cpp (simulated clock, latency and failure injection), fdbserver/SimulatedCluster.cpp (seed to randomised config), https://apple.github.io/foundationdb
+- **FoundationDB simulation: DeterministicRandom, BUGGIFY, sim2** (rel 4, library, Apache-2.0) https://github.com/apple/foundationdb
+  - bottlenecks: C1, C11, C12, C14
+  - Original deterministic simulation design: a single seeded DeterministicRandom drives everything, BUGGIFY sites are activated per-run with probability (P_BUGGIFIED_SECTION_ACTIVATED 0.25) and fire with probability 0.25, so each seed explores a different fault configuration; knobs are randomised per seed. Pattern for SIH fault injection points that are no-ops in default mode (identical behaviour at default settings) and per-seed random when enabled.
+  - speed claim: none
+  - read: flow/include/flow/Buggify.h (BuggifySection, getGeneralSBVar) at 751bb5c705a248cbd65d0b643888143dd73bd018, flow/include/flow/DeterministicRandom.h and flow/DeterministicRandom.cpp (mt19937_64, resetSeed), fdbrpc/sim2.cpp (simulated clock/network), fdbserver/SimulatedCluster.cpp (knob/config randomis
+- **FreeRTOS-Kernel POSIX/Linux port (portable/ThirdParty/GCC/Posix)** (rel 4, runner-or-infrastructure, MIT) https://github.com/FreeRTOS/FreeRTOS-Kernel/tree/main/portable/ThirdParty/GCC/Posix
+  - bottlenecks: P5, P1, P2
+  - Opened the source. One pthread per task, but exactly one runs at a time: a switch is one direct baton hand-off, event_signal on the target thread's own mutex+condvar followed by event_wait on the caller's own (prvSwitchThread -> prvResumeThread -> prvSuspendSelf). So a task switch costs 2 futex operations and wakes exactly 1 host thread, with no scheduler thread in the middle. The tick is a separate thread looping pthread_kill(SIGALRM) then usleep(tick period) in real time, so there is no virtual or fast-forward time. Lift the per-waiter baton event (private mutex, condvar and a 'triggered' flag, so wakeups are never lost or spurious) to replace usleep(100) polling for actuator_outputs_sim and any broadcast wake. Do NOT lift the timer thread; it is a real-time pacer.
+  - speed claim: none
+  - read: portable/ThirdParty/GCC/Posix/port.c: prvSwitchThread, prvSuspendSelf, prvResumeThread, prvTimerTickHandler, vPortSystemTickHandler, portable/ThirdParty/GCC/Posix/utils/wait_for_event.c: event_create, event_wait, event_wait_timed, event_signal, port.c header comment on SIGALRM and signal masking (li
+- **GGPO synctest backend (state checksum + replay verification)** (rel 4, library, MIT) https://github.com/pond3r/ggpo
+  - bottlenecks: C13, P4
+  - SyncTest runs the game N frames, loads the saved state from N frames ago, re-simulates, and compares per-frame checksums against those saved the first time; any mismatch means hidden non-saved state or non-determinism. Cheap way to verify that SIH state snapshot/restore (P4, reset instead of restart) is complete: restore then replay must match.
+  - speed claim: none
+  - read: src/lib/ggpo/backends/synctest.cpp (IncrementFrame: saved_frames queue, _check_distance, checksum compare) at 7ddadef8546a7d99ff0b3530c6056bc8ee4b9c0a, src/lib/ggpo/sync.cpp (SaveCurrentFrame, LoadFrame, checksum)
+- **Genesis sensor pipeline (SensorManager, IMU, ring buffers)** (rel 4, simulator, Apache-2.0) https://github.com/Genesis-Embodied-AI/Genesis
+  - bottlenecks: P5, C14, C2, C12
+  - Sensor layer designed for thousands of parallel environments: per-sensor noise, bias, random_walk, resolution, read delay and jitter held in tensors, with precomputed has_any_noise/has_any_delay/has_any_jitter flags that skip the whole imperfection path when nothing is enabled (the 'identical, zero-cost at defaults' property SIH must keep), plus timeline ring buffers for delayed and historical reads. IMU also does mag with the same options. Pattern lift, not code (Python/GPU).
+  - speed claim: none
+  - read: genesis/engine/sensors/base_sensor.py (SharedSensorMetadata: delays_ts, jitter_ts, has_any_* flags; SimpleSensorMetadata), genesis/engine/sensors/sensor_manager.py (timeline rings, delay sampling), genesis/engine/sensors/imu.py (IMUOptions, bias/random_walk/noise/resolution), genesis/utils/ring_buff
+- **Giotto: A Time-Triggered Language for Embedded Programming (Henzinger, Horowitz, Kirsch) and the Embedded Machine** (rel 4, paper, ) https://doi.org/10.1109/jproc.2002.805825
+  - bottlenecks: P1, C14
+  - Origin of Logical Execution Time: task outputs become visible only at the end of a fixed interval, so the I/O delay is a design rule rather than a race. Gives a reproducible actuator-delay knob (C14) and removes the mid-tick handshake (P1). The E-machine paper (10.1145/512565.512567) is the portable executor that enforces it.
+  - speed claim: none
+  - read: Proc. IEEE 2003 paper, sections on mode switches and the task/driver model, The embedded machine, 10.1145/512565.512567
+- **Hash Functions for GPU Rendering (Jarzynski & Olano, JCGT 2020)** (rel 4, paper, Paper; the PCG hash is public (see Warp rand.h)) https://jcgt.org/published/0009/03/02/
+  - bottlenecks: C1, C2, C3
+  - Benchmarks integer hash functions (PCG, xxhash32, Murmur3, Jenkins etc.) as stateless per-thread RNGs and ranks them by quality and cost; use it to choose the hash for a counter-style per-sample noise source without running our own statistical tests.
+  - speed claim: none
+  - read: Sections on quality testing (TestU01 / empirical) and the conclusions table recommending PCG variants
+- **Hazelcast: LockSupport.parkNanos under the hood (timer slack investigation)** (rel 4, write-up, Blog text, copyright Hazelcast. Idea only.) https://hazelcast.com/blog/locksupport-parknanos-under-the-hood-and-the-curious-case-of-parking/
+  - bottlenecks: P2, P1
+  - A worked measurement of exactly the usleep(100) problem: a timed futex wait returns a fixed ~50 us late because of timer slack, and changing /proc/PID/timerslack_ns changes the delay. Has a small C program and strace output that could be turned into a SIH micro-benchmark of usleep(100) vs. absolute clock_nanosleep with slack 1.
+  - speed claim: Quoted from the opened page: 'On my Linux box, each iteration took just over 60 μs' for a 5,000 ns park; 55,000 ns gave about 110 us and 110,000 ns about 150 us; after `echo 200000 > timerslack_ns` the C program took well over 200 us. Hardware and kernel not stated in the post.
+  - read: section 'Going Deeper' and 'Dive into the Kernel' (timerslack_ns experiments), the sleepgranularity C program
+- **Hyper-V guest clocks doc (vDSO TSC page, stimer0)** (rel 4, write-up, GPL-2.0 docs) https://github.com/torvalds/linux/blob/master/Documentation/virt/hyperv/clocks.rst
+  - bottlenecks: P2, P1
+  - Reading time via gettimeofday/clock_gettime stays in user space (TSC and shared page, no trap), so P2 cost is the sleeps, not the reads. Clockevents use Hyper-V synthetic timer 0 in direct mode; programming a timer for nanosleep/usleep is a synthetic MSR write (my inference that it exits to host). Favours replacing usleep with futex or spin waits.
+  - speed claim: none
+  - read: Documentation/virt/hyperv/clocks.rst x86/x64 section, drivers/clocksource/hyperv_timer.c
+- **IRT RWTH IMU-Simulator (maximilian-nitsch)** (rel 4, library, BSD-3-Clause (adaptable with attribution)) https://github.com/maximilian-nitsch/IMU-Simulator
+  - bottlenecks: C2, C13, P7
+  - Most complete open C++ IMU error model found: turn-on bias, scale and misalignment/non-orthogonality, colored (non-white) noise with angle/velocity random walk, bias instability and rate/acceleration random walk, saturation, quantisation, WGS84 earth rate and transport rate, plus Allan-deviation plotting scripts for validating the generated noise. Single-seed constructor. Covers every IMU gap in C2 and its Allan scripts are a ready-made C13 check.
+  - speed claim: none
+  - read: src/imu_simulator.cpp (ImuSimulator ctor with seed, stochastic error generation) at 52dc185561a750d91ae221d0c5f3f4045c953647, include/imu_simulator_package/imu_simulator_structures.h (ImuSimParams, ImuStochasticErrors), scripts/plot_imu_simulator_allan_std.m, test/imu_simulator_test.cpp
+- **JAX PRNG design (JEP 263): Threefry + functional key splitting** (rel 4, write-up, Apache-2.0) https://docs.jax.dev/en/latest/jep/263-prng.html
+  - bottlenecks: C1, C12, P6
+  - Rationale for dropping a sequential global RNG: 'too much sequencing' blocks parallelism and reproducibility. split/fold_in give a tree of independent keys. Useful as the design template for a per-run key tree (run -> instance -> sensor -> step) in SIH and for batched parameter sweeps.
+  - speed claim: none
+  - read: docs/jep/263-prng.md in jax-ml/jax, jax._src.prng (threefry2x32, split, fold_in); file path not located in tree listing, search the repo
+- **JSBSim sensor error model (FGSensor)** (rel 4, source-file, LGPL-2.1 (idea only)) https://github.com/JSBSim-Team/jsbsim/blob/911b2d48ce934da183556983ec60b2069faa46fb/src/models/flight_control/FGSensor.cpp
+  - bottlenecks: C2, C3, C14
+  - A compact, parameterised sensor chain: quantization (bits, min, max), bias, drift_rate, first-order lag (Tustin coefficients ca/cb), noise with gaussian or uniform distribution and absolute or percent variation. This is a ready template for the IMU and other sensor errors SIH lacks (C2, C3), each field being a plain scalar that a scenario can change live.
+  - speed claim: none
+  - read: src/models/flight_control/FGSensor.cpp constructor lines 59-115 and the Run/Noise/Bias/Lag/Quantize helpers, tests/TestSensorRandomSeed.py (per-instance seed test)
+- **JSBSim winds (FGWinds: turbulence, cosine gust, up/downburst, per-instance seed)** (rel 4, source-file, LGPL-2.1 (idea only)) https://github.com/JSBSim-Team/jsbsim/blob/911b2d48ce934da183556983ec60b2069faa46fb/src/models/atmosphere/FGWinds.cpp
+  - bottlenecks: C4, C5, C1
+  - Shows a full wind stack behind named properties: steady wind, Turbulence(h), CosineGust with start/steady/end durations, UpDownBurst cells, and SetRandomSeed so each model owns its random stream (fixes the shared rand() order problem of C1). Gives a concrete list of what C4 needs beyond constant north/east wind.
+  - speed claim: none
+  - read: src/models/atmosphere/FGWinds.cpp: Turbulence (l.200), CosineGustProfile (l.397), CosineGust (l.415), UpDownBurst (l.486), SetRandomSeed (l.500), bind (l.515), src/models/atmosphere/FGStandardAtmosphere.cpp and FGMSIS.cpp for C5 (temperature and density offsets)
+- **Jiminy (duburcqa) sensor layer with delay, jitter and shared circular buffer** (rel 4, simulator, MIT) https://github.com/duburcqa/jiminy
+  - bottlenecks: C14, C3, P5
+  - Every sensor has options noiseStd, bias, delay, jitter and delayInterpolationOrder (0/1). Sensors of one type share a single boost::circular_buffer of past truth values and times, sized for the largest delay, so per-sensor delay and jitter cost one buffer per sensor type, not one per sensor. That is the data layout to lift for sensor latency and jitter in SIH, replacing ad-hoc delay lines.
+  - speed claim: none
+  - read: core/include/jiminy/core/hardware/abstract_sensor.h (SharedStorage with times_/data_ circular buffers, delayMax_, config noiseStd/bias/delay/jitter/delayInterpolationOrder at ~70-96), core/include/jiminy/core/hardware/abstract_sensor.hxx (delay interpolation and noise application)
+- **Julia TaskLocalRNG (Xoshiro256++ forked on task creation)** (rel 4, source-file, MIT) https://github.com/JuliaLang/julia
+  - bottlenecks: C1, P6
+  - The exact fix for 'one global rand() whose draw order depends on thread scheduling': each task's RNG state is derived deterministically from the parent state at spawn, so parallel results are reproducible regardless of schedule. Pattern for SIH: derive child streams for sih task, sensor_*_sim work items and gz_bridge from one root seed at construction.
+  - speed claim: none
+  - read: stdlib/Random/src/Xoshiro.jl at 1cb4c0e3f3c05ea5beb1121cd565b911600f7b2e: 'Task local RNG' section (l.182-205), initstate!, internal splitmix state s4
+- **Kalibr wiki: IMU Noise Model** (rel 4, write-up, unclear (wiki; Kalibr repo is BSD-style, GitHub reports NOASSERTION)) https://github.com/ethz-asl/kalibr/wiki/IMU-Noise-Model
+  - bottlenecks: C2, C12
+  - The reference definition that RotorS, AirSim, gz-sensors, allan_variance_ros and Aria all cite: continuous-to-discrete conversion of noise density and bias random walk, and units. SIH should copy these conventions so datasheet or Allan-fit numbers can be entered directly. Documentation, not code. The /IMU-Noise-Model-and-Intrinsics page returned a redirect (302).
+  - speed claim: none
+  - read: wiki page 'IMU Noise Model' (discrete-time sigma_g_d = sigma_g/sqrt(dt), sigma_bg_d = sigma_bg*sqrt(dt))
+- **L2F / rl-tools multirotor environment (Learning to Fly in Seconds)** (rel 4, simulator, MIT per GitHub metadata for rl-tools/l2f. rl-tools repo license not read.) https://github.com/rl-tools/l2f
+  - bottlenecks: P7, C6, C7, C12, C14
+  - Header-only multirotor dynamics with per-rotor parameters, parameter sampling for domain randomization, motor lag, and several vehicle parameter sets. Read it for a compact C++ rotor and integrator layout and for the parameter sampler that makes every variable randomizable.
+  - speed claim: claim, from the paper abstract (arXiv 2311.13081): 'a very fast multirotor dynamics simulator that can simulate about 5 months of flight per second on a laptop GPU'. This is a GPU batch of many vehicles, not a single in-process vehicle, so it does not transfer directly to SIH.
+  - read: rl-tools/rl-tools: include/rl_tools/rl/environments/l2f/operations_generic/60_dynamics.h, operations_generic/70_post_integration.h, operations_generic/10_sample_initial_parameters.h, parameters/default.h and parameters/dynamics/crazyflie.h, flightmare.h, arpl.h, fs.h, paper: https://arxiv.org/abs/23
+- **LLVM libc++ atomic wait/notify (src/atomic.cpp)** (rel 4, library, Apache-2.0 with LLVM exception (adaptable with attribution)) https://github.com/llvm/llvm-project/blob/aa5022f25fba8912561ae1d62c88f802b2afa688/libcxx/src/atomic.cpp
+  - bottlenecks: P1, P5
+  - Production C++20 std::atomic::wait: platform layer picks FUTEX_WAIT_PRIVATE on Linux, __ulock_wait on macOS, WaitOnAddress on Windows, and a hashed contention table (cache-line aligned __contention_state with a waiter count) skips the wake syscall when nobody waits. Shows how to write one portable wake primitive across the OSes PX4 SITL builds on.
+  - speed claim: none
+  - read: libcxx/src/atomic.cpp: __libcpp_platform_wait_on_address / _notify_on_address (futex, ulock, WaitOnAddress branches), __contention_state and __get_contention_state, libcxx/include/__atomic/atomic_sync.h, libcxx/include/__thread/poll_with_backoff.h (spin then sleep policy with elapsed-time argument)
+- **LMAX Disruptor (wait strategies, sequence barrier)** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/LMAX-Exchange/disruptor
+  - bottlenecks: P1, P2, P5
+  - The clearest catalogue of consumer wait policies: BusySpin, Yielding, Sleeping, Blocking, PhasedBackoff (spin, then yield, then fall back). LiteBlockingWaitStrategy only signals when a waiter is registered, which is the fix for always-signal-on-publish (P5). A selectable wait policy for SIH/lockstep (spin for unthrottled runs, block for shared CPUs) is directly liftable as a small C++ enum plus function.
+  - speed claim: Qualitative ordering only (from search-result summaries, not measured by me): Blocking has the highest latency and lowest CPU; BusySpin the lowest latency and highest CPU.
+  - read: src/main/java/com/lmax/disruptor/WaitStrategy.java, src/main/java/com/lmax/disruptor/PhasedBackoffWaitStrategy.java, src/main/java/com/lmax/disruptor/LiteBlockingWaitStrategy.java, src/main/java/com/lmax/disruptor/SleepingWaitStrategy.java, src/main/java/com/lmax/disruptor/ProcessingSequenceBarrier.
+- **LMAX Disruptor wait strategies** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/LMAX-Exchange/disruptor/tree/c871ca49826a6be7ada6957f6fbafcfecf7b1f87/src/main/java/com/lmax/disruptor
+  - bottlenecks: P1, P5
+  - Named strategy menu behind one interface: BusySpin, Yielding, Sleeping, Blocking, LiteBlocking (a signalNeeded flag skips the lock and notify when no one waits), TimeoutBlocking, PhasedBackoff (spin for X, yield for Y, then delegate to a fallback strategy). LiteBlocking addresses per-step notify cost; PhasedBackoff addresses the spin-then-sleep shape.
+  - speed claim: none
+  - read: WaitStrategy.java, PhasedBackoffWaitStrategy.java, LiteBlockingWaitStrategy.java (signalNeeded.getAndSet), SleepingWaitStrategy.java, ProcessingSequenceBarrier.java, src/test/.../support/WaitStrategyTestUtil.java
+- **Learning to Fly (L2F) and RLtools multirotor simulator** (rel 4, simulator, MIT (copyable with attribution)) https://github.com/arplaboratory/learning-to-fly
+  - bottlenecks: C1, C2, C6, C8, P7
+  - Header-only C++ quadrotor dynamics, templated on float type and integer type, with the same code compiled for CPU and CUDA. Parameter structs for random force and torque disturbances, observation noise, action noise, domain randomization of mass and inertia factors, and an Integration struct, composed by inheritance. A C++ model of how to expose every variable as a plain parameter struct with no heap. Parent project rl-tools (MIT, 1054 stars, pushed 2026-10-31) also confirmed.
+  - speed claim: none
+  - read: include/learning_to_fly/simulator/multirotor.h (Parameters, ParametersDisturbances, ParametersDomainRandomization, Integration), include/learning_to_fly/simulator/operations_generic.h, include/learning_to_fly/simulator/parameters/dynamics/crazy_flie.h, include/learning_to_fly/simulator/quaternion_he
+- **Lingua Franca reactor-c** (rel 4, runner-or-infrastructure, BSD-2-Clause (adaptable with attribution; GitHub API reports NOASSERTION, LICENSE.md text opened)) https://github.com/lf-lang/reactor-c
+  - bottlenecks: P2, P3, C11, C14, C13
+  - Deterministic coordination runtime with logical time and a -fast flag that skips waiting for physical time. reactor_threaded.c wait_until() returns immediately when fast is set. This is a clean model for P3 (as fast as possible) that does not change event ordering, and for scheduled events with exact tags (C10, C11). Federated and sync_tag_advance schedulers show multi-instance time advance.
+  - speed claim: none
+  - read: core/threaded/reactor_threaded.c (wait_until, fast, keepalive, around lines 181-360), core/threaded/scheduler_sync_tag_advance.c, core/utils/pqueue_tag.c (tag-ordered event queue), core/tag.c, core/utils/lf_semaphore.c
+- **Linux UML time-travel mode (arch/um/kernel/time.c)** (rel 4, source-file, GPL-2.0 (idea only)) https://github.com/torvalds/linux/blob/master/arch/um/kernel/time.c
+  - bottlenecks: P1, P5, P3
+  - A lockstep protocol between a simulator and an external time master that uses a lease: time_travel_ext_free_until lets the follower advance freely until a granted time, with a request/wait round trip only when it needs more (time_travel_ext_request / time_travel_ext_wait). It also keeps a sorted event list (time_travel_events) and modes OFF, INFCPU, BASIC, EXTERNAL; 'INFCPU' treats CPU work as zero time, comparable to an unthrottled mode. A lease would replace per-tick handshakes with one handshake per granted window. GPL-2.0, idea only.
+  - speed claim: none
+  - read: arch/um/kernel/time.c: time_travel_ext_request(), time_travel_ext_wait(), __time_travel_add_event(), time_travel_update_time(), time_travel_handle_real_alarm(), Documentation/virt/uml/user_mode_linux_howto_v2.rst, section on time-travel
+- **Linux User Mode Linux (UML) time-travel mode (infcpu and external controller)** (rel 4, source-file, GPL-2.0 (SPDX header read in time.c and timetravel.h): idea only, no text copy) https://github.com/torvalds/linux/blob/master/include/uapi/linux/um_timetravel.h
+  - bottlenecks: P2, P3, P5, P6, C11, C14
+  - The cleanest protocol I found for making one real program's clock obey an outside time master. Modes: TT_MODE_OFF, BASIC, INFCPU, EXTERNAL. In EXTERNAL mode the guest sends REQUEST (run me at time T), WAIT, GET, UPDATE and the calendar replies RUN or FREE_UNTIL (permission to run freely up to a time). A shared-memory page (time_travel_shm, free_until, per-client slots, CAP_TIME_SHARE) lets clients read time and the free-run horizon without a socket round trip. Maps directly onto a SIH time-master/scenario supervisor and onto cheap per-step time reads (P2).
+  - speed claim: none
+  - read: include/uapi/linux/um_timetravel.h (message ops, FREE_UNTIL, SCHEDSHM structs), arch/um/kernel/time.c: time_travel_set_time, time_travel_handle_message, the shm setup near 'always look at that free_until from now on', arch/um/include/shared/timetravel.h
+- **Linux kernel Hyper-V clocks documentation and bug 213029** (rel 4, write-up, kernel docs, GPL-2.0 project; read only) https://docs.kernel.org/virt/hyperv/clocks.html
+  - bottlenecks: P2, P5
+  - WSL2 is a Hyper-V guest. SIH calls gettimeofday and hrt_absolute_time (clock_gettime) every step. If the guest clocksource is the Hyper-V page clock and the vDSO fast path is not used, every time read is a real syscall, which adds kernel time that scales with ticks. Bugzilla 213029 reports a 5.12 regression where clock_gettime became much slower with that clocksource (reporter's loop: about 3.3 s before, about 48 s after, mostly system time). Check /sys/devices/system/clocksource/clocksource0/current_clocksource on the builder and microbench clock_gettime there; this is a cheap explanation candidate for the 3 to 4 times kernel-to-user ratio. WSL2-specific behaviour is NOT verified.
+  - speed claim: Bugzilla 213029 reporter: about 3.3 s to about 48 s for a clock_gettime loop after 5.12, hardware not captured in my notes (taken from a search summary).
+  - read: docs.kernel.org/virt/hyperv/clocks.html, bugzilla.kernel.org/show_bug.cgi?id=213029
+- **Linux perf sched (record, timehist -w, latency, map)** (rel 4, tool, GPL-2.0 (Linux kernel)) https://man7.org/linux/man-pages/man1/perf-sched.1.html
+  - bottlenecks: P5, P1, P2
+  - I checked the man page and the source: 'perf sched timehist -w/--wakeups' (the page says 'Show wakeup events') prints each wakeup event inline with the switches, and it also handles sched:sched_waking. It reports wait time, scheduling delay and run time per switch and has a per-thread summary (-s/-S). It needs no BPF and works from a perf.data file, so a waker-to-wakee table can be made with perf sched script plus a short aggregation. perf sched map shows which thread runs on which CPU.
+  - speed claim: none
+  - read: man perf-sched: 'OPTIONS FOR PERF SCHED TIMEHIST' (-w, --wakeups, -s, -S, -M, --state, -P), tools/perf/builtin-sched.c: timehist_sched_wakeup_event (~line 2911) and timehist_print_wakeup_event (~line 2867), builtin-sched.c: struct thread_runtime and timehist_update_runtime_stats (dt_delay, the time 
+- **Linux scheduler wake_affine and WF_SYNC (kernel/sched/fair.c, v6.6)** (rel 4, source-file, GPL-2.0 (kernel). Idea only.) https://github.com/torvalds/linux/blob/v6.6/kernel/sched/fair.c
+  - bottlenecks: P5, P1
+  - wake_affine_idle() returns the waker's CPU when the wake is sync and the waker is the only runnable task (nr_running == 1). I confirmed futex wake does not set WF_SYNC: wake_up_q() in core.c line 1029 calls plain wake_up_process(). Pipe writes use wake_up_interruptible_sync_poll (fs/pipe.c lines 370-598), so they do. A pipe, or any wake on a wait queue with the sync flag, as the SIH-to-waiter signal asks the scheduler to put the wakee on the SIH CPU. Eventfd uses wake_up_locked_poll with no sync flag (checked in eventfd.c).
+  - speed claim: none
+  - read: kernel/sched/fair.c wake_affine_idle() lines ~6817-6842: the 'sync && cpu_rq(this_cpu)->nr_running == 1' branch, kernel/sched/fair.c select_task_rq_fair(), line ~7928: sync = wake_flags & WF_SYNC, kernel/sched/core.c wake_up_q() line ~1013 and wake_up_process() line ~4476 (no sync flag), fs/pipe.c p
+- **Madrona (CPU ThreadPoolExecutor, futex-style atomic wait)** (rel 4, simulator, MIT (adaptable with attribution)) https://github.com/shacklettbp/madrona
+  - bottlenecks: P5, P1, P4
+  - The CPU executor in src/mw/cpu_exec.cpp keeps workers pinned. One cache-line-aligned atomic (workerWakeup) is released with notify_all, and the main thread waits on a second atomic (mainWakeup). Each step costs one wake-up round and not per-item signalling. src/core/taskgraph.cpp runs a fixed task graph in data-oriented order each step, which is a model for run-to-completion execution of a tick. The ECS layout (archetype-sorted data) is a lift for data layout, not for the flash budget.
+  - speed claim: Claim from the project page and a search summary (not checked in the paper text): over 1.9M steps per second on a single GPU (SIGGRAPH 2023 paper). Also claimed: a trivial Overcooked-AI port was over 1000X faster than the original. This is a GPU figure and does not carry over to SIH.
+  - read: src/mw/cpu_exec.cpp: pinThread (lines 58-95), Impl::workerThread (line 197 on), workerWakeup/mainWakeup use, src/core/taskgraph.cpp, src/core/state.cpp, SIGGRAPH 2023 paper: https://madrona-engine.github.io/shacklett_siggraph23.pdf
+- **Maxwait: A Generalized Mechanism for Distributed Time-Sensitive Systems** (rel 4, paper, ) https://arxiv.org/abs/2601.21146
+  - bottlenecks: P1, P5, C14
+  - Directly on 'what a time master should wait on'. One rule (wait up to a bounded time for inputs, then take a defined fault path) is said to subsume PTIDES, Chandy-Misra with or without null messages, Time-Warp and LET. A model for the SIH actuator wait: bounded wait with a defined fallback, not an unbounded poll.
+  - speed claim: none
+  - read: Abstract and the section on LET realized via maxwait
+- **Minimax polynomial ECEF to geodetic coordinate transformation approximations (arXiv 2405.06572)** (rel 4, paper, not checked) https://arxiv.org/abs/2405.06572
+  - bottlenecks: P7
+  - Benchmarks more than 40 ECEF-to-LLA methods (per the search summary) and gives polynomial approximations; directly relevant to replacing the per-step ECEF to LLA conversion in SIH with a cheap non-iterative one at known accuracy.
+  - speed claim: none
+  - read: comparison tables of methods and cost, Bowring 1976/1985 section
+- **MuJoCo Warp (per-world model fields, history buffers, determinism tests)** (rel 4, physics-engine, Apache-2.0) https://github.com/google-deepmind/mujoco_warp
+  - bottlenecks: C13, C14, C1, C7, P4, P7
+  - Three liftable ideas. (1) determinism_test.py lists physics state fields and runs repeated steps to prove run-to-run equality: a template for C13 golden/determinism tests. (2) history.py is a ring buffer with time-indexed interpolated lookup (actuator and sensor delay, C14). (3) put_model(batch_sizes) and override_model show per-world parameter arrays versus shared ones plus a string override syntax ('opt.iterations = 1'), a clean way to vary any variable per run.
+  - speed claim: none
+  - read: mujoco_warp/_src/determinism_test.py (_PHYSICS_FIELDS, run-to-run comparison), mujoco_warp/_src/history.py (_history_find_index, circular buffer with cursor), mujoco_warp/_src/io.py: put_model (~415), override_model (~3727)
+- **Multikernel vs KVM lmbench idle-policy article and gist** (rel 4, write-up, unknown for article; gist unspecified) https://multikernel.io/2026/08/16/multikernel-vs-kvm-lmbench/
+  - bottlenecks: P1, P5
+  - Only measured table found for how idle policy changes wake cost in a VM. The context-switch table shows HLT vs idle=poll vs mwait passthrough; benchmark scripts are published. Shows the VM wake penalty is mostly the idle exit, which supports pinning/polling for the SIH thread chain. It is KVM, not Hyper-V.
+  - speed claim: Measured on a dual-socket Xeon Gold 5418Y, KVM guest with 2 vCPUs pinned, lmbench: context switch 3.42 us (HLT default) vs 1.49 us (idle=poll) vs 1.58 us (mwait passthrough); pipe 7.06 vs 3.34 vs 3.49 us; AF_UNIX 7.48 vs 3.40 vs 5.01 us. Idle=poll cost +19 W package power and 100% busy idle cores. Source: multikernel.io article, medians of three runs.
+  - read: Latency Tables and Idle policy comparison sections, gist https://gist.github.com/congwang-mk/fc44d8bcca520c607255a93012e81874
+- **NASA Trick (EventManager, Variable Server, Monte Carlo, checkpoints)** (rel 4, simulator, NASA Open Source Agreement 1.3 (LICENSE read)) https://github.com/nasa/trick
+  - bottlenecks: C10, C11, C12, P4, C13
+  - Production-grade sim executive with the exact features asked for: an EventManager with conditional and timed events that set any variable by address, a Variable Server (TCP, read or write any sim variable at a chosen cycle or synchronously with the frame), a MonteCarlo module (MonteVarFixed/File/Random/Calculated, seeds per run) and checkpoint dump and load. Live set of an exact variable at an exact time is how Trick does C10. Licence is NASA Open Source Agreement 1.3, which is not a standard permissive licence: treat as idea-only unless legal says otherwise.
+  - speed claim: none
+  - read: trick_source/sim_services/EventManager/EventManager.cpp, EventInstrument.cpp, include/trick/compat/sim_services/EventManager/include/Event.hh, include/trick/compat/sim_services/VariableServer/include/VariableServer.hh, variable_server_sync_types.h, include/trick/compat/sim_services/MonteCarlo/includ
+- **Newton (NVIDIA / DeepMind / Disney)** (rel 4, physics-engine, Apache-2.0) https://github.com/newton-physics/newton
+  - bottlenecks: C6, C3, C14, C12, P3
+  - Has an actuator layer with separable pieces: drives (PD, PID, neural MLP/LSTM/GRU), clamping (DC motor curve, max effort), and a delay stage. This is a ready blueprint for per-motor thrust curve, lag, delay and saturation in SIH (C6, C14). Also has an IMU sensor class and an asv benchmark suite with metric tracks that could be copied as the structure for SIH throughput regression tests.
+  - speed claim: Secondary press only (not opened at source): 'up to 252x' MuJoCo Warp over MJX for locomotion and '475x' for manipulation on an RTX PRO 6000 Blackwell, repeated by byteiota.com and others; conditions not described. Treat as unverified claim.
+  - read: newton/_src/actuators/delay.py, newton/_src/actuators/clamping/clamping_dc_motor.py, newton/_src/actuators/drives/drive_pd.py, drive_neural_mlp.py, newton/_src/actuators/actuator.py, newton/_src/sensors/sensor_imu.py, asv/benchmarks/benchmark_metric_tracks.py, asv/benchmarks/simulation/bench_actuato
+- **Nyx-Net: Network Fuzzing with Incremental Snapshots** (rel 4, paper, paper; code RUB-SysSec/nyx-net has no licence in API) https://arxiv.org/abs/2111.03013
+  - bottlenecks: P4, C11
+  - Incremental (hierarchical) snapshots: take a second snapshot part-way into an input, so later runs share the prefix. Maps to SIH as boot snapshot, then converged-and-armed snapshot, then in-flight snapshot, with many scenario branches from each. Also shows byte-code scenario format for replayable inputs.
+  - speed claim: Claim (abstract): 'improves test throughput by up to 300x' vs state-of-the-art network fuzzers, 'speedups of 10-30x' playing Super Mario; hardware not read.
+  - read: arxiv 2111.03013 Sections on incremental snapshots and the scenario/spec format, github.com/RUB-SysSec/nyx-net
+- **OpenRAND (header-only Philox/Tyche/Squares/Threefry with (seed, counter) constructor)** (rel 4, library, MIT) https://github.com/msu-sparta/OpenRAND
+  - bottlenecks: C1, P6, C12
+  - Small MIT header-only counter-based library with a (seed, counter) constructor meant for 'one RNG object per particle per step'. Direct pattern for per-sensor, per-step RNG objects built on the stack in SIH. Easy to copy with attribution.
+  - speed claim: claim: 'as fast and often faster than libstdc++ or cuRAND' (README, no figure quoted)
+  - read: include/openrand/philox.h, include/openrand/tyche.h, include/openrand/base_state.h, README usage section
+- **OpenVINS simulator (Simulator.cpp)** (rel 4, simulator, GPL-3.0 (ideas only)) https://github.com/rpng/open_vins
+  - bottlenecks: C1, C2, C12, C14
+  - Keeps four separate seeded std::mt19937 streams (state init, parameter perturbation, IMU measurements, one per camera) from four seed parameters, so changing one experiment dimension does not shift the others. It also perturbs calibration parameters such as the camera-IMU time offset (calib_camimu_dt += 0.01*w) per run, and logs the true bias history. That is a ready pattern for C1 and for C12 randomised calibration. The IMU stage is bias += sigma_wb*sqrt(dt)*N, meas += sigma_w/sqrt(dt)*N. GPL-3.0, so ideas only.
+  - speed claim: none
+  - read: ov_msckf/src/sim/Simulator.cpp (constructor seeding lines ~128-140, perturb_parameters, get_next_imu lines ~311-385), ov_init/src/sim/SimulatorInit.cpp, config/rpng_sim/kalibr_imu_chain.yaml
+- **PCG random number generators (pcg-c-basic and pcg-cpp)** (rel 4, library, Apache-2.0 (pcg-c-basic and pcg-cpp per GitHub API; pcg-cpp README also offers MIT, not checked). Adaptable with attribution.) https://github.com/imneme/pcg-c-basic
+  - bottlenecks: C1, C12
+  - Minimal 32-bit PCG in about 9 lines of C. pcg32_srandom_r(state, initstate, initseq) gives a selectable stream via initseq, so stream id maps directly to sensor/noise source. pcg32_advance (in pcg-cpp) allows jump-ahead. Also the author's write-ups on seeding and stream selection are useful design reading.
+  - speed claim: none
+  - read: pcg_basic.c: pcg32_srandom_r, pcg32_random_r, pcg32_boundedrand_r, https://github.com/imneme/pcg-cpp (include/pcg_random.hpp: advance, multi-stream, set_stream), https://www.pcg-random.org/posts/ease-of-use-without-loss-of-power.html
+- **PX4 EKF2 change-indication test (test_EKF_withReplayData + CI auto-commit)** (rel 4, tool, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/ekf2/test/change_indication
+  - bottlenecks: C13
+  - The closest in-tree golden-trace mechanism. A step-driven replay writes a state CSV every 0.1 s for 35 s, CI regenerates it and fails on any git diff, and a human reviews the diff in the PR. A SIH version would log vehicle state at fixed sim times and diff against a committed baseline to prove default behaviour is unchanged. It is a text diff, not a hash.
+  - speed claim: none
+  - read: src/modules/ekf2/test/test_EKF_withReplayData.cpp (irisGps and ekfGsfReset cases), .github/workflows/checks.yml, lines ~90-103: step 'Auto-update EKF change indication baselines' then 'Check for EKF functional changes' (git diff --exit-code in src/modules/ekf2/test/change_indication), src/modules/ek
+- **PX4 EKF2 replay test with golden CSV (EkfReplayTest)** (rel 4, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/ekf2/test
+  - bottlenecks: C13, C2, C3
+  - In-tree pattern for proving a change did not alter behaviour: feed recorded sensor data to the estimator through a SensorSimulator and diff the logged state against a committed change_indication CSV. The same shape serves an SIH golden trace (fixed seed, fixed inputs, compare state hashes or CSV). SensorSimulator also has per-sensor classes (imu, gps, baro, mag, range, flow) that could inform C3 model structure.
+  - speed claim: none
+  - read: src/modules/ekf2/test/test_EKF_withReplayData.cpp (EkfReplayTest irisGps, ekfGsfReset), src/modules/ekf2/test/change_indication/*.csv, src/modules/ekf2/test/replay_data/*.csv, src/modules/ekf2/test/sensor_simulator/sensor_simulator.cpp
+- **PX4 PR #29075 perf(uORB): keep clock reads, locks and call layers off the hot paths** (rel 4, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29075
+  - bottlenecks: P5
+  - Twelve behaviour-preserving cuts to per-call uORB cost (no clock read when poll finds nothing, skip poll_notify when no waiters, direct node publish, now-taking overloads). Directly reduces per-tick user and lock cost on the publish and idle-poll paths. Check whether the pinned commit has it. Companion merged PR #29249 (skip subscription lookups until a device node is added).
+  - speed claim: Measured on fmu-v6xrt (NuttX 12.12.0), uorb_tests flight 10, 2 kHz source: rate filter latency mean 4 to 4 us, p99 8 to 8, max 28 to 12 us; rate control mean 10 to 9 us, p99 16 to 15 us, max 35 to 20 us. This is a MCU measurement, not SITL. Source: PR body.
+  - read: platforms/common/uORB/SubscriptionInterval.cpp (updated()), platforms/common/uORB/uORBDeviceNode.cpp (publish, poll_notify), platforms/common/uORB/Publication.cpp, PR #29074 bench features (uorb_tests flight)
+- **PX4 PR #29593 share one white Gaussian noise generator (merged)** (rel 4, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29593
+  - bottlenecks: C1, C2, C3
+  - New stateless math::generate_wgn(float*, n) used by sih and the sensor_*_sim modules. Removes shared static Box-Muller state that could return NaN across threads, which is a prerequisite for per-stream seeding. Still draws from rand(), so a seedable per-stream generator (C1) remains to be done on top. Also confirms the sensor_baro/gps/mag/airspeed/agp sim modules are separate work items, each a possible wakeup source.
+  - speed claim: none
+  - read: src/lib/mathlib/math/WhiteGaussianNoise.cpp and .hpp, src/lib/mathlib/math/test/WhiteGaussianNoiseTest.cpp, src/modules/simulation/sensor_baro_sim/SensorBaroSim.cpp
+- **PX4 failure injection (SIH already partly supports it)** (rel 4, write-up, BSD-3-Clause (PX4)) https://docs.px4.io/main/en/debug/failure_injection.html
+  - bottlenecks: C3, C11
+  - The docs table shows SIH at HEAD already supports off/stuck for gyro, accel, mag, baro and distance sensor, off/stuck/wrong for GPS, battery/ESC off/wrong, and motor stuck. Pinned sih.cpp already reads a _failure_config (accel/gyro/airspeed/distance blocked). So the injection API exists; what is missing is time- or trigger-scheduled use of it and richer fault kinds (drift, bias step, dropout bursts, latency). Build C11 on it rather than inventing a new channel.
+  - speed claim: none
+  - read: docs page support table (SIH column), src/modules/simulation/simulator_sih/sih.cpp lines ~221-235 (_failure_config.update, *_blocked flags) at 95a0c23482329183d932ac99da00faa7e8d63143, src/lib/failure_injection (process_esc and Mode enum, location not opened)
+- **PX4 mavsdk_tests integration runner (in-tree)** (rel 4, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/test/mavsdk_tests
+  - bottlenecks: P3, P6, C10, C11
+  - Existing per-test config layer for SIH: sih-sitl.json injects PX4_PARAM_<NAME> environment variables per test case, and the runner takes --speed-factor and --iterations. Also the code that refuses a concurrent px4 (P6) and the failure-injection test. Shows what to extend into a scenario file and where to remove the single-instance assumption.
+  - speed claim: none
+  - read: test/mavsdk_tests/configs/sih-sitl.json, test/mavsdk_tests/mavsdk_test_runner.py (args --speed-factor, --iterations; 'px4 process already running' check ~146), test/mavsdk_tests/integration_test_runner/test_runner.py (Px4Runner env, ~374-388), test/mavsdk_tests/integration_test_runner/process_helper
+- **PX4 uORB: SubscriptionCallback and DeviceNode (the baseline to improve)** (rel 4, source-file, BSD-3-Clause (own code)) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/platforms/common/uORB/uORBDeviceNode.cpp
+  - bottlenecks: P1, P5
+  - Read at the pinned commit. write() holds ATOMIC_ENTER (a lock on POSIX) around fetch_add, memcpy, and the loop over _callbacks calling item->call(generation), which runs ScheduleNow() inside the publisher's critical section; poll notify happens after the lock. SubscriptionCallbackWorkItem::call already has a count gate and interval gate. SIH could register a SubscriptionCallback for actuator_outputs_sim that posts a futex or binary semaphore instead of polling with usleep(100). Copy-out on the subscriber side takes the same lock.
+  - speed claim: none
+  - read: platforms/common/uORB/uORBDeviceNode.cpp write() lines ~140-220, platforms/common/uORB/uORBDeviceNode.hpp copy() lines ~233-275, platforms/common/uORB/SubscriptionCallback.hpp (SubscriptionCallbackWorkItem::call), platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp set_absol
+- **PX4-SITL_gazebo-classic sensor plugins (gps, imu, baro, mag, airspeed, lidar, sonar)** (rel 4, library, unclear (no repo license detected; per-file headers to check)) https://github.com/PX4/PX4-SITL_gazebo-classic
+  - bottlenecks: C2, C3
+  - PX4's own previous sensor models, with Kalibr-style IMU parameters (noise density, random walk, bias correlation time, turn-on bias sigma) and a GPS model with XY and Z random walk plus position and velocity noise densities. This is the lowest-friction source of parameter names and defaults that PX4 users will recognise, and the plugins can be compared against SIH's flat white noise. Per-file headers appear to carry BSD or Apache terms, but GitHub shows no repository license. Check each file header before copying.
+  - speed claim: none
+  - read: src/gazebo_imu_plugin.cpp, src/gazebo_gps_plugin.cpp (gpsXYRandomWalk, gpsXYNoiseDensity, gpsVXYNoiseDensity), src/gazebo_barometer_plugin.cpp, src/gazebo_magnetometer_plugin.cpp, include/common.h
+- **Paparazzi NPS (nps_main_sitl.c)** (rel 4, simulator, GPL-2.0+ (reimplement only)) https://github.com/paparazzi/paparazzi/blob/master/sw/simulator/nps/nps_main_sitl.c
+  - bottlenecks: P2, P3, P5, C4, C5, C14
+  - The sim loop is a catch-up loop: on each host tick it runs `while (sim_time <= host_time_elapsed) nps_main_run_sim_step()`, and each step runs sensors and the whole autopilot inline in one thread. Time factor is a host_time_factor, adjustable live, with no per-step sleeps. Also has nps_atmosphere, nps_sensors with noise and latency, and JSBSim, CRRCSim and fixed-wing FDM backends.
+  - speed claim: none
+  - read: sw/simulator/nps/nps_main_sitl.c: nps_main_loop (about lines 90-170), nps_main_run_sim_step (74), sw/simulator/nps/nps_autopilot_rotorcraft.c, sw/simulator/nps/nps_sensors.c, nps_sensors_utils.c, nps_atmosphere.c, nps_random.c
+- **Pegasus Simulator** (rel 4, simulator, BSD-3-Clause) https://github.com/PegasusSimulator/PegasusSimulator
+  - bottlenecks: P1, C2, C3, C5, C14
+  - Isaac Sim extension with PX4 and ArduPilot MAVLink backends. Sensor plugins are the useful part: IMU with noise_density, random_walk, bias_correlation_time and turn_on_bias_sigma per axis (Gauss-Markov bias), GPS with xy/z random walk and noise densities and an open TODO for latency, barometer with lapse rate and drift_pa_per_sec, magnetometer with geo-magnetic tables (geo_mag_utils.py), per-sensor update_rate decorator. Also a worked lockstep wait loop (poll_mavlink_messages with blocking recv) to compare with SIH's usleep(100) poll.
+  - speed claim: none
+  - read: extensions/pegasus.simulator/pegasus/simulator/logic/sensors/imu.py, sensors/gps.py, sensors/barometer.py, sensors/magnetometer.py and geo_mag_utils.py, backends/px4_mavlink_backend.py (update, poll_mavlink_messages, enable_lockstep, send_sensor_msgs), thrusters/quadratic_thrust_curve.py, dynamics/l
+- **Perfetto trace processor: waker_utid, thread_executing_span, critical path** (rel 4, library, Apache-2.0 (checked with the GitHub API)) https://github.com/google/perfetto
+  - bottlenecks: P5, P1
+  - Perfetto records ftrace sched_waking and sched_switch and stores waker_utid on thread_state. Its SQL stdlib then builds a wakeup graph and a critical path: the chain of threads that actually gated one thread, which is the right view for what a time master waits on. PerfettoSQL lets you count (waker_utid, utid) edges per simulated tick. The Perfetto docs have a case study on scheduling blockages. A thread_executing_span ends only at a runnable slice woken by a process, not an interrupt.
+  - speed claim: none
+  - read: src/trace_processor/perfetto_sql/stdlib/sched/thread_executing_span.sql (_runnable_state, waker_utid, S-R pair logic), src/trace_processor/perfetto_sql/stdlib/sched/states.sql, latency.sql, src/trace_processor/plugins/critical_path/critical_path.cc, docs/data-sources/cpu-scheduling.md, docs/case-stu
+- **PufferLib (vectorization layer)** (rel 4, library, MIT (confirmed via gh)) https://github.com/PufferAI/PufferLib
+  - bottlenecks: P1, P5, P6, P4
+  - Workers share one buffer and busy-wait on a per-worker flag array. There are no pipes or queues, so there is no syscall and no context switch on the hot path. This is the strongest example I found of replacing wake-ups with shared flags. It also has an autotune that picks worker and batch counts, and per-env seed derivation (make_seeds), which fits C1.
+  - speed claim: Claim: the official docs say busy-wait flags 'virtually eliminate' IPC overhead, and a blog says shared multiprocessing.Array gave about 20% over Pipe. I saw these in search summaries only. I found no firm steps-per-second figure with hardware.
+  - read: tag 3.0, pufferlib/vector.py: _worker_process (line ~172, flag loop with sleep fallback), Multiprocessing class (line ~226), recv (~356) and send (~447), semaphores array in the shared buf, make_seeds (~710), autotune (~740), HEAD src/puffercpu.c and src/pufferenv.h (the current C rewrite; I did not
+- **ROS 2 EventsExecutor (rclcpp, from iRobot events-executor)** (rel 4, library, BSD-3-Clause per GitHub (repo view); rclcpp is Apache-2.0. Can adapt with attribution.) https://github.com/irobot-ros/events-executor
+  - bottlenecks: P5, P1
+  - A single event queue and one condition variable per executor replace per-entity waits and polling. Fewer wake-ups and deterministic ordering. The queue-plus-timers-manager design maps onto the question of what a time master should wait on, and onto ordering PX4 work items inside one thread.
+  - speed claim: claim: 'cut both CPU and latency by 75%' vs SingleThreadedExecutor on a 10-node system, measured with iRobot's ros2-performance framework (hardware not stated in the search summary). A different prototype post claims CPU 20% to 6% on a Raspberry Pi, 1 process, 20 nodes. Neither was opened by me; both came from search summaries. Source: https://github.com/irobot-ros/events-executor and https://discourse.openrobotics.org/t/reducing-ros-2-cpu-overhead-by-simplifying-the-ros-2-layers/13808
+  - read: rclcpp/include/rclcpp/experimental/executors/events_executor/events_executor.hpp, rclcpp/src/rclcpp/experimental/executors/events_executor/events_executor.cpp, rclcpp/include/rclcpp/experimental/executors/events_executor/simple_events_queue.hpp, rclcpp/src/rclcpp/experimental/timers_manager.cpp, (rc
+- **ROS 2 rclcpp Events Executor and events queue** (rel 4, library, Apache-2.0 (from memory, not checked in this session; verify)) https://github.com/ros2/rclcpp
+  - bottlenecks: P5, P8
+  - Replaces the 'rebuild a waitset and rescan every timer every iteration' pattern with an event queue, one condition variable per executor, and a heap for timers. Close analogue of PX4 work-queue wakeups (ScheduleNow per callback) and of the lockstep waiter list. The pluggable EventsQueue interface is a model for swapping in a deterministic, replayable queue.
+  - speed claim: Claim (secondhand, a ROS Discourse post seen in a search result, not opened): iRobot reported CPU use falling from about 20% to 6% on its prototype; no hardware seen. https://discourse.openrobotics.org/t/reducing-ros-2-cpu-overhead-by-simplifying-the-ros-2-layers/13808
+  - read: rclcpp/include/rclcpp/experimental/executors/events_executor/events_executor.hpp, rclcpp/include/rclcpp/experimental/executors/events_executor/events_queue.hpp and simple_events_queue.hpp, rclcpp/src/rclcpp/experimental/executors/events_executor/events_executor.cpp, rclcpp/include/rclcpp/experimenta
+- **RTAMT (STL monitoring, Python and C++ library)** (rel 4, library, BSD-3-Clause) https://github.com/nickovic/rtamt
+  - bottlenecks: C11, C13
+  - Offline and online robustness monitors for signal temporal logic with a C++ library of operator nodes. An in-process monitor could evaluate pass/fail properties each step and let the run quit with a status. Small enough to read; embedding is optional (SITL only, not flight hardware).
+  - speed claim: none
+  - read: rtamt/cpplib/stl/rtamt_stl_library/src/stl_always_node.cpp, rtamt/cpplib/stl/rtamt_stl_library/src/stl_eventually_node.cpp, rtamt/cpplib/stl/ (monitor assembly), rtamt/ python offline/online semantics
+- **Rapier (and rapier.rs determinism guide)** (rel 4, physics-engine, Apache-2.0) https://github.com/dimforge/rapier
+  - bottlenecks: C13, P4, C1
+  - enhanced-determinism feature flag pins transcendentals through libm and disables SIMD and parallel; the docs verify with an MD5/SHA/FNV hash of a serialized world snapshot; CI has golden-hash tests, snapshot round-trip and portability tests, and a thread-count determinism test. Copyable pattern: serialize full state, hash it, pin the hash, fail if any build drifts. Snapshot restore doubles as fast reset.
+  - speed claim: none
+  - read: https://rapier.rs/docs/user_guides/rust/determinism, crates/rapier3d/tests/simd_backend_determinism.rs (golden hash, per docs.rs listing of 0.35.3), .run/Test_snapshot_portability__3D_.run.xml and Test_thread_count_determinism.run.xml (CI recipe names), bindings/python/examples/serde/snapshot_restor
+- **Renode time framework (MasterTimeSource, SlaveTimeSource, TimeHandle, quantum, AdvanceImmediately)** (rel 4, simulator, MIT (Renode LICENSE says MIT): adaptable with attribution) https://github.com/renode/renode-infrastructure/tree/master/src/Emulator/Main/Time
+  - bottlenecks: P1, P3, P5, C14
+  - A time source grants a quantum of virtual time, every sink runs until it reports back, then a sync phase runs with nobody executing, then the next grant. That is a named, tunable barrier (the answer to 'how does the master know all components finished'). AdvanceImmediately is the documented 'as fast as possible' switch: otherwise it sleeps when virtual time runs ahead of wall time. Slave sources with finer quanta give tight sync for chosen nodes only. CurrentLoad / CummulativeLoad give a built-in real-time-factor meter. Pause vs halt (IsHalted) distinction is useful for the IMU-failure stop in P8.
+  - speed claim: none
+  - read: src/Emulator/Main/Time/MasterTimeSource.cs, SlaveTimeSource.cs, TimeHandle.cs, TimeDomainsManager.cs, Sleeper.cs, https://renode.readthedocs.io/en/latest/advanced/time_framework.html
+- **Renode time framework (time sources, sinks, quantum, time domains)** (rel 4, simulator, MIT (LICENSE file says so)) https://github.com/renode/renode
+  - bottlenecks: P1, P3, P5, P8, C10, C14
+  - Best written model of 'how a time master knows everyone finished': a master source grants a quantum of virtual time, every sink runs it and reports back, then a synchronization phase runs, and leftover granted time carries over. Pausing one member blocks the domain; an IsHalted flag lets a stopped member not block others (relevant to P8 IMU failure stops). Slave sources split a quantum for tighter sync of chosen nodes. AdvanceImmediately switches between throttled-to-realtime and as-fast-as-possible. Quantum changes apply only at the next grant, a clean rule for C10.
+  - speed claim: none
+  - read: https://renode.readthedocs.io/en/latest/advanced/time_framework.html, renode-infrastructure src/Emulator/Main/Time/TimeHandle.cs, TimeSourceBase.cs, MasterTimeSource.cs, SlaveTimeSource.cs, TimeDomainsManager.cs (repo renode/renode-infrastructure, pinned cdf0cd3dcda1ede992290128ef291600b720849a)
+- **Renode virtual time framework (time sources, quantum, sync phase)** (rel 4, simulator, MIT (root LICENSE of renode/renode says MIT, Antmicro)) https://github.com/renode/renode-infrastructure
+  - bottlenecks: P1, P2, P3, P5, P6, C10, C14
+  - A clean written model of a time master: MasterTimeSource grants a quantum, every sink reports back, then a synchronization phase runs when nobody executes (safe point for cross-node messages and for applying changes at an exact virtual time, C10), then the next quantum. Slave time sources split or accumulate quanta, quantum changes take effect only at the next grant, 'AdvanceImmediately' removes pacing (the P3 'as fast as possible' switch), IsHalted lets an unused member stop blocking. Virtual time resolution is 1 ns.
+  - speed claim: No speed figure. Doc facts only: default CPU performance 100 MIPS; quantum 1 us lets a 1 MIPS CPU run one instruction; quantum may not be zero (source: time_framework page).
+  - read: https://renode.readthedocs.io/en/latest/advanced/time_framework.html, renode-infrastructure src/Emulator/Main/Time/MasterTimeSource.cs, SlaveTimeSource.cs, TimeHandle.cs, TimeSourceBase.cs, TimeDomainsManager.cs, Sleeper.cs, TimeInterval.cs
+- **SALib (Sobol, Morris, FAST, delta, PAWN and more)** (rel 4, library, MIT) https://github.com/SALib/SALib
+  - bottlenecks: C12
+  - Sample/analyze split for global sensitivity analysis: write the sample matrix, run any simulator, feed outputs back to analyze. Fits SIH well because a sweep needs no coupling to the engine: just a parameter catalog (problem dict) and a results column. Morris screening is the cheap first pass over dozens of the C-series variables.
+  - speed claim: none
+  - read: src/SALib/sample/saltelli.py, morris/morris.py, latin.py, fast_sampler.py, src/SALib/analyze/sobol.py, morris.py, delta.py, pawn.py, src/SALib/sample/common_args.py (problem definition)
+- **Seastar timer_set (include/seastar/core/timer-set.hh)** (rel 4, source-file, Apache-2.0) https://github.com/scylladb/seastar/blob/master/include/seastar/core/timer-set.hh
+  - bottlenecks: P5, P1
+  - Compact deadline set with 65 buckets (timestamp_bits+1) chosen by count-leading-zeros of (timestamp XOR last-expired), plus a std::bitset of non-empty buckets. insert and remove are O(1), get_next_timeout() scans only non-empty buckets, and expire(now) touches only buckets that can be due. Works because time only moves forward, as in lockstep. Single-header, no allocation beyond intrusive lists, so it ports to NuttX/POSIX easily. Apache-2.0, adaptable with attribution.
+  - speed claim: none
+  - read: include/seastar/core/timer-set.hh: timer_set::get_index(), insert(), remove(), expire(), get_next_timeout(), _non_empty_buckets, include/seastar/core/bitset-iter.hh
+- **Shadow network simulator (shim + runahead + scheduler)** (rel 4, simulator, BSD-3-Clause style (LICENSE text read: redistribution conditions + disclaimer); adaptable with attribution) https://github.com/shadow/shadow
+  - bottlenecks: P1, P2, P5, P6, P8, C1, C13, C14
+  - Runs real binaries in simulated time. Lifts: (1) time syscalls (clock_gettime, gettimeofday, time) answered inside the shim from a shared-memory emulated clock with no round trip, which is the model for SIH-side time reads without a lock or syscall; (2) model-unblocked-syscall-latency, which charges a small simulated cost per call so busy loops cannot stall time forever (a model for P8); (3) Runahead: window length = min used latency, the lookahead idea for deciding how many steps components may run without sync; (4) scheduler latches (count_down_latch, simple_latch, thread_parking) as the 'all workers finished the round' barrier for P5/P6; (5) per-host deterministic RNG seeded from one master seed (C1).
+  - speed claim: claim, from the Phantom paper abstract (the design Shadow v2 adopted), USENIX ATC 2022, https://www.usenix.org/system/files/atc22-jansen.pdf: 'up to 2.2x faster than Shadow, up to 3.4x faster than NS-3, and up to 43x faster than gRaIL in large P2P benchmarks'. Hardware not extracted; read section 5 of the paper. docs/design_2x.md gives no numbers.
+  - read: src/lib/shim/shim_sys.c: _shim_sys_get_time and the clock_gettime/gettimeofday/time cases, unapplied CPU latency (lines ~24-190), src/lib/shim/patch_vdso.c and shim_insn_emu.c (vDSO patching, rdtsc emulation), src/main/core/runahead.rs (Runahead::get, dynamic runahead), src/lib/scheduler/src/sync/co
+- **SimBricks** (rel 4, simulator, MIT; adaptable with attribution) https://github.com/simbricks/simbricks
+  - bottlenecks: P1, P5, P6, C11, C14
+  - Joins unmodified simulators with a pairwise synchronization protocol over shared-memory FIFO queues. Each link has a configured latency; a peer that has seen a message stamped t may advance to t + latency, so periodic sync messages at the link-latency period are enough and ordinary timestamped messages double as implicit syncs. This replaces a global 'wait for everyone' barrier and is the model for a sim thread and a flight-stack thread that need not hand-shake every step when sensor/actuator latency (C14) already gives slack. Also has a Python experiment orchestration layer (simulation configs) relevant to C12.
+  - speed claim: none
+  - read: https://arxiv.org/pdf/2012.14219 (SIGCOMM 2022 paper, sync protocol pseudocode), lib/simbricks/base/if.c, if.h, proto.h (queue and sync message handling), https://simbricks.readthedocs.io/en/latest/devel/arch.html
+- **Simbody event handlers and TimeStepper** (rel 4, library, Apache-2.0 (copyable with attribution)) https://github.com/simbody/simbody
+  - bottlenecks: C10, C11, C14
+  - Separates ScheduledEventHandler, TriggeredEventHandler, PeriodicEventHandler and EventReporter around a TimeStepper, with the integrator stepping up to the event time. A compact, older version of the same scenario-layer design as Drake. It shows how a handler may change state or parameters and report a termination status.
+  - speed claim: none
+  - read: SimTKcommon/Simulation/include/SimTKcommon/internal/EventHandler.h (ScheduledEventHandler line 84, TriggeredEventHandler 109, PeriodicEventHandler 146), SimTKcommon/Simulation/include/SimTKcommon/internal/EventReporter.h, SimTKmath/Integrators/include/simmath/TimeStepper.h
+- **Squares: A Fast Counter-Based RNG (Widynski, arXiv 2004.06278)** (rel 4, paper, unknown; reference code on the author site (200 OK), check terms) https://arxiv.org/abs/2004.06278
+  - bottlenecks: C1, C2, C3
+  - A counter-based generator built from four rounds of 64-bit multiply and swap, with no tables and about a dozen operations per 32-bit output. A good fit for tiny flash and no-FPU targets as the stateless noise source. Claimed to pass stringent statistical tests.
+  - speed claim: claim in abstract: 'may be the fastest counter-based generators', no figure read
+  - read: abstract and algorithm listing in the paper, https://squaresrng.wixsite.com/rand
+- **Squirrel Eiserloh noise-based RNG (SquirrelNoise5)** (rel 4, write-up, Original gist license not verified; reimplement from the idea) https://gdcvault.com/play/1024365/Math-for-Game-Programmers-Noise
+  - bottlenecks: C1, C2, C3
+  - Same idea as counter-based RNG but in a ~10-line hash: RNG(seed, position) is a pure function, giving unordered access and lock-free parallelism. Fits 'noise = f(seed, step, channel)'. Talk video is members-only (page returns 200 but I could not watch it); the code exists as public gists/ports and the author later superseded Squirrel3 with SquirrelNoise5 after a weakness was reported.
+  - speed claim: CLAIM from a secondary write-up: slightly faster in C++ than std::hash<int>; not verified
+  - read: GDC 2017 'Math for Game Programmers: Noise-Based RNG', SquirrelNoise5 gist by Eiserloh (search 'SquirrelNoise5.hpp')
+- **Taskflow AtomicNotifier / NonblockingNotifier (derived from Eigen EventCount)** (rel 4, library, MIT (adaptable with attribution; Eigen original file is MPL-2.0)) https://github.com/taskflow/taskflow/blob/9d9cea031a7f4c8ec97179668c34ee47378e5a99/taskflow/core/atomic_notifier.hpp
+  - bottlenecks: P1, P5
+  - Eventcount-style two-phase wait (prepare_wait, re-check predicate, commit_wait or cancel_wait). notify is cheap when nobody waits, so a publisher can call it on every step at almost no cost, and no lost wakeups are possible. Suits a condition-variable-free wake for the SIH thread and for work queue wakeups.
+  - speed claim: none
+  - read: taskflow/core/atomic_notifier.hpp: prepare_wait, cancel_wait, commit_wait, notify_one, notify_all (header comment explains the Dekker-style protocol), taskflow/core/nonblocking_notifier.hpp, 3rd-party/eigen-3.3.7/unsupported/Eigen/CXX11/src/ThreadPool/EventCount.h, unittests/test_notifiers.cpp
+- **UIUC Propeller Data Site (Volumes 1-4)** (rel 4, paper, No licence page for the propeller data was found. The lab's general data notice, written for airfoil data, says the data may be freely copied and used commercially, but it is copyrighted and products must prominently credit the UIUC Low-Speed Airfoil Test program. Inferred, not confirmed for propellers; ask Prof. Selig before shipping a derived table. The site asks for a citation with retrieval date.) https://m-selig.ae.illinois.edu/props/propDB.html
+  - bottlenecks: C6
+  - Measured static CT0/CP0 and wind-tunnel CT/CP/eta versus advance ratio for many small and APC props. Reduce a few props to a small CT(J), CP(J) table (about 10 points) to give SIH a table-driven thrust and torque map with thrust loss versus airspeed, replacing a single constant. Volume 4 holds the 2021-22 APC Thin Electric tests; the page also lists a Volume 3 that the seed skipped.
+  - speed claim: none
+  - read: https://m-selig.ae.illinois.edu/props/propDB.html (Basic Relations: CT, CP, eta definitions), https://m-selig.ae.illinois.edu/props/volume-1/propDB-volume-1.html, https://m-selig.ae.illinois.edu/props/volume-4/propDB-volume-4.html, APC geometry .peo files linked from the page (PE0-FILES_WEB-202206.z
+- **VerifAI (falsification and sampling toolkit)** (rel 4, library, BSD-3-Clause) https://github.com/BerkeleyLearnVerify/VerifAI
+  - bottlenecks: C1, C12, P6
+  - A sampler abstraction (random, Halton, grid, cross-entropy, Bayesian optimisation, multi-armed bandit, simulated annealing, multi-objective) separated from the simulator by a server/client pair, plus an error_table that records every failing sample. This is the experiment-design core SIH lacks: pick samplers by name, run clients in parallel, tabulate failures, replay by sample.
+  - speed claim: none
+  - read: src/verifai/samplers/*.py (halton.py, cross_entropy.py, multi_armed_bandit.py, bayesian_optimization.py), src/verifai/server.py and client.py, src/verifai/error_table.py, src/verifai/falsifier.py and monitor.py
+- **WSL .wslconfig and wsl.conf reference (Advanced settings configuration)** (rel 4, write-up, Microsoft docs, no code to lift) https://learn.microsoft.com/en-us/windows/wsl/wsl-config
+  - bottlenecks: P5, P6, P4
+  - Defines the knobs available without touching PX4: [wsl2] processors, kernel, kernelCommandLine, nestedVirtualization (default true; try false), vmIdleTimeout, memory, swap, plus [experimental] autoMemoryReclaim (default dropCache, which reclaims cached memory immediately; try disabled for stable timing). processors can be lowered to shrink the IPI domain; kernelCommandLine carries mitigations=off, idle=poll or nohz options; kernel points to a custom build.
+  - speed claim: none
+  - read: Section '.wslconfig' > 'Main WSL settings' table (kernel, kernelCommandLine, processors, nestedVirtualization, vmIdleTimeout), Section 'Experimental settings' (autoMemoryReclaim), 'The 8 second rule' (wsl --shutdown needed to apply)
+- **WSL2 kernel config (config-wsl): what the stock guest kernel lacks** (rel 4, source-file, GPL-2.0) https://github.com/microsoft/WSL2-Linux-Kernel/blob/a989171929bed4ea681be8d77333845ce1c1732a/arch/x86/configs/config-wsl
+  - bottlenecks: P1, P2, P5
+  - Read: ARCH_CPUIDLE_HALTPOLL not set, CPU_IDLE_GOV_TEO not set (menu and ladder only), HZ=250, NO_HZ_IDLE not NO_HZ_FULL, PREEMPT_NONE (dynamic), SCHEDSTATS off, SCHED_CORE off, CPU_ISOLATION=y, PARAVIRT_SPINLOCKS on. A custom kernel via .wslconfig kernel= with haltpoll-style polling, TEO, HZ=1000, or schedstats for perf sched is a lever. kernelCommandLine (idle=poll, isolcpus, nohz_full) is available without rebuilding but nohz_full needs CONFIG_NO_HZ_FULL.
+  - speed claim: none
+  - read: arch/x86/configs/config-wsl lines ~100-136, 361-370, 472-476, 679-682, 7306
+- **Webots FAST mode loop: WbSimulationWorld::modeChanged QTimer(0) + step()** (rel 4, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/engine/WbSimulationWorld.cpp
+  - bottlenecks: P2, P3
+  - Real-time and fast differ only in the timer interval: REALTIME starts mTimer at basicTimeStep, FAST starts it at 0 (the source comment says 'the 0 argument here is important'), so fast mode is a run-to-completion loop with no wall-clock reads, no sleeping and no speed-factor scaling of timeouts. Fast mode also mutes sound and skips rendering. This is a template for a PX4_SIM_SPEED_FACTOR=unthrottled mode that skips gettimeofday/usleep(0) entirely, and for decoupling pacing from physics by a mode switch instead of a scalar.
+  - speed claim: none
+  - read: WbSimulationWorld::modeChanged (~278-309), WbSimulationWorld::step (~180-266), docs/guide/starting-webots.md: --mode=<pause|realtime|fast>, and the note that --minimize forces Fast mode
+- **Webots Supervisor API** (rel 4, simulator, Apache-2.0) https://github.com/cyberbotics/webots
+  - bottlenecks: C11, C8, C7, C9, P4, P3
+  - Opened supervisor.h: field setters (wb_supervisor_field_set_*), wb_supervisor_node_add_force/add_torque/add_force_with_offset (C8), set_velocity, reset_physics, simulation_reset, simulation_revert, simulation_quit(status) (exit code for CI, C11), world_load/reload/save, simulation_set_mode (pause/real-time/fast, P3), and node_save_state/load_state, a named in-memory node snapshot that is a candidate for P4. Apache-2.0, so adaptable.
+  - speed claim: none
+  - read: include/controller/c/webots/supervisor.h, src/controller/c/supervisor.c, src/controller/cpp/Supervisor.cpp, src/webots/ (simulation_reset and node save_state/load_state implementations; not located yet)
+- **Webots Supervisor command path: WbSupervisorUtilities (add_force, add_torque, field set, quit with status, reset)** (rel 4, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/nodes/utils/WbSupervisorUtilities.cpp
+  - bottlenecks: C8, C10, C11
+  - Supervisor requests are parsed in one switch and applied in robot->processImmediateMessages() at the start of the next physics step (before prePhysicsStep), so every change lands on an exact simulated step. add_force/add_torque go straight to ODE's per-step accumulators (world or body frame, force at centre-of-mass offset), which are cleared each step, giving a one-step external-disturbance API. SIMULATION_QUIT takes an exit status passed to WbApplication::simulationQuit, which is the 'quit with a status' mechanism for C11. Models a SIH scenario command channel: timestamped commands applied at tick boundaries.
+  - speed claim: none
+  - read: case C_SUPERVISOR_SIMULATION_QUIT (~628), case C_SUPERVISOR_NODE_ADD_FORCE / ADD_FORCE_WITH_OFFSET / ADD_TORQUE (~1096-1192), case C_SUPERVISOR_FIELD_SET_VALUE (~1616), WbSimulationWorld::step: processImmediateMessages loop (~190-194), docs/reference/supervisor.md
+- **Webots pull-based sensor sampling: WbSensor** (rel 4, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/nodes/WbSensor.cpp
+  - bottlenecks: P5, C3, C14
+  - Every device has a sampling period in simulated ms. needToRefresh() returns true only when the device is enabled and elapsedTime() >= period, so an unused sensor costs nothing and each sensor runs at its own rate on the shared step. SIH could use a small per-sensor scheduler like this to compute and publish GPS, baro, mag and so on only when due. That also gives per-sensor rates and latency for C3 and C14 and removes needless uORB publishes.
+  - speed claim: none
+  - read: WbSensor::needToRefresh / needToRefreshInMs / updateTimer / elapsedTime, callers: WbGps.cpp, WbAccelerometer.cpp, WbGyro.cpp (postPhysicsStep / refresh)
+- **Webots split step API: wb_robot_step_begin / wb_robot_step_end** (rel 4, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/controller/c/robot.c
+  - bottlenecks: P1, P5, C14
+  - The controller can send its actuator request (step_begin) and do its own work while the simulator advances, then collect sensors (step_end). One call pair per tick, with only two hand-offs. For SIH this suggests a two-phase tick, publish-and-signal then wait-once, so the stack and the physics overlap instead of alternating through many wakeups. It also gives a natural one-step actuator delay (C14).
+  - speed claim: none
+  - read: robot.c robot_step_begin (~line 903) and robot_step_end (~946), wb_robot_step_begin/wb_robot_step_end/wb_robot_step (~972-1030), robot_send_request (~365), src/controller/c/scheduler.c scheduler_send_request
+- **Wine NtAlertThreadByThreadId / NtWaitForAlertByThreadId (per-thread parking futex)** (rel 4, source-file, LGPL-2.1-or-later (reimplement the idea, do not copy text)) https://github.com/wine-mirror/wine/blob/master/dlls/ntdll/unix/sync.c
+  - bottlenecks: P5, P1
+  - Read. Each thread owns one futex word. NtAlertThreadByThreadId does InterlockedExchange(futex,1) and calls futex_wake_one only if the old value was 0. NtWaitForAlertByThreadId loops on InterlockedExchange(futex,0), calling futex_wait only when it was 0. This is a minimal, race-free park/unpark pair, with no mutex or condvar and so no post-wake mutex re-acquire, which suits a per-waiter 'your tick' token in a time master. The batch alert (line ~3517) is just a loop of single wakes, so there is no kernel batching there. Wine ntdll is LGPL.
+  - speed claim: none
+  - read: dlls/ntdll/unix/sync.c: NtAlertThreadByThreadId, NtWaitForAlertByThreadId (lines ~3407 to 3625), futex_wait / futex_wake_one wrappers (lines ~114 to 195)
+- **Zephyr native_sim and native_simulator (event-driven HW models with infinite-speed clock)** (rel 4, runner-or-infrastructure, Apache-2.0 (not opened this session)) https://github.com/zephyrproject-rtos/zephyr/tree/main/soc/native/inf_clock
+  - bottlenecks: P2, P3, P5, P8, C14
+  - The closest embedded-RTOS-in-a-process simulation to SIH. An 'inf_clock' SoC: the CPU never burns real time; a tiny HW scheduler holds the next-event time of each model (timer, etc.) and jumps to the earliest one, with an optional slowdown-to-real-time. native_sim_timer.c shows the tick timer as a one-shot compare armed with hwtimer_set_tick_one_shot (NSI_NEVER to disable). That is the pattern for replacing SIH's fixed usleep pacing with an event-queue clock. Only file names and the timer driver were opened; the scheduler code in the separate native_simulator repo was not read.
+  - speed claim: none
+  - read: soc/native/inf_clock/ (cpu_freq.c, native_remap.c, Kconfig), drivers/timer/native_sim_timer.c, BabbleSim/native_simulator: nsi_hw_scheduler.c, nsi_timer (file names not verified)
+- **Zephyr native_simulator (nsi hardware scheduler, rt_ratio)** (rel 4, runner-or-infrastructure, Apache-2.0; adaptable with attribution) https://github.com/zephyrproject-rtos/zephyr/tree/main/scripts/native_simulator
+  - bottlenecks: P1, P2, P3, P8, C10
+  - Firmware compiled for the host with a simulated hardware timer model and no wall-clock dependence: nsi_hws_find_next_event picks the earliest timer and nsi_hws_sleep_until_next_event jumps simulated time straight to it (idle skipping; relevant to P8 where the loop stops and nothing can advance). Real-time pacing is a separate, optional layer (hwtimer_set_rt_ratio, hwtimer_adjust_rt_ratio, --rt-ratio / --rt-drift options) so unthrottled and paced modes share one code path (P3). native_rtc.c shows several clock types (boot, realtime, pseudo-host-realtime) derived from the simulated clock.
+  - speed claim: none
+  - read: scripts/native_simulator/common/src/nsi_hw_scheduler.c (nsi_hws_find_next_event line ~101, nsi_hws_sleep_until_next_event line ~75), scripts/native_simulator/native/src/timer_model.c (hwtimer_set_rt_ratio ~386, hwtimer_adjust_rt_ratio ~402, rt-ratio/rt-drift args ~541-566, rt sync print ~260), scrip
+- **abseil synchronization (Mutex, Notification, Waiter, KernelTimeout)** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/abseil/abseil-cpp/tree/b652a9f424a1ceeaa86efb77bc7c6c1cab84a2f8/absl/synchronization
+  - bottlenecks: P1, P2, P5
+  - Spin counts are chosen from the machine: mutex.cc calls MeasureTimeToYield and derives the sleep time (clamped 10 us to 1 ms), and sets spin iterations by CPU count (1500). Pattern to lift: calibrate the spin budget at startup instead of hard-coding 100 us. FutexWaiter plus KernelTimeout shows how to turn deadlines into absolute kernel timeouts.
+  - speed claim: none
+  - read: absl/synchronization/mutex.cc: MutexGlobals, MeasureTimeToYield, MutexDelay, spinloop_iterations (around lines 84-200, 1577, 1893-1906), absl/synchronization/internal/futex_waiter.cc and waiter_base.cc, absl/synchronization/internal/kernel_timeout.h, absl/synchronization/notification.cc, absl/synchr
+- **abseil synchronization: futex_waiter, Notification, Mutex spin policy, SpinLock backoff** (rel 4, library, Apache-2.0) https://github.com/abseil/abseil-cpp
+  - bottlenecks: P1, P2, P5
+  - FutexWaiter::WaitUntil shows the right way to pass a deadline: use FUTEX_WAIT_BITSET with an absolute CLOCK_MONOTONIC timeout and avoid relative timeouts that drift. Mutex::Block spins a bounded count (mutex_sleep_spins 5000 aggressive, 250 gentle on multicore, 0 on single-core) before sleeping, and that value is picked once at startup by CPU count. SpinLockSuggestedDelayNS has an exponential delay from 128 microseconds. Notification is a ready-made one-shot event.
+  - speed claim: none
+  - read: absl/synchronization/internal/futex_waiter.cc (WaitUntil, Wait, Post), absl/synchronization/internal/futex.h, absl/synchronization/internal/kernel_timeout.h (MakeAbsTimespec), absl/synchronization/mutex.cc (GetMutexGlobals, mutex_sleep_spins), absl/base/internal/spinlock_wait.cc (SpinLockSuggestedDe
+- **allan_variance_ros (ImuSimulator + Allan deviation tool)** (rel 4, tool, BSD-3-Clause) https://github.com/ori-drs/allan_variance_ros
+  - bottlenecks: C2, C13
+  - BSD-3-Clause tool that fits Allan deviation to real IMU logs and includes an ImuSimulator (about 100 lines) that generates data from the fitted noise density and random walk. Round trip: SIH noise output -> Allan tool -> recovered parameters is a ready determinism and fidelity check for a new noise stage (C13). Needs ROS/boost for the tool but the simulator core is simple and copyable.
+  - speed claim: none
+  - read: src/ImuSimulator.cpp, src/AllanVarianceComputor.cpp, scripts/analysis.py, config/ (yaml with accelerometer_noise_density, accelerometer_random_walk)
+- **arch/x86/hyperv/hv_apic.c (Hyper-V paravirtual IPI path)** (rel 4, source-file, GPL-2.0 (idea only)) https://github.com/microsoft/WSL2-Linux-Kernel/blob/linux-msft-wsl-6.6.y/arch/x86/hyperv/hv_apic.c
+  - bottlenecks: P5
+  - Explains why a cross-vCPU futex_wake costs more than bare metal. hv_apic_init() replaces send_IPI/send_IPI_mask with hv_send_ipi* when the hypervisor sets HV_X64_CLUSTER_IPI_RECOMMENDED. A single target uses the fast HVCALL_SEND_IPI (hv_do_fast_hypercall16); sets with VP numbers over 63 or non-fast cases use HVCALL_SEND_IPI_EX (hv_do_rep_hypercall). EOI uses an MSR write (hv_apic_eoi_write). Each wake of an idle vCPU is therefore a hypercall plus an EOI exit on the receiver, which supports co-locating waker and wakee on a busy vCPU or avoiding halts.
+  - speed claim: none
+  - read: hv_apic_init (line ~289), hv_send_ipi_mask and __send_ipi_mask / __send_ipi_mask_ex (lines ~110-260), hv_apic_eoi_write (~89)
+- **bcc offwaketime / wakeuptime (python tools)** (rel 4, tool, Apache-2.0 header in tools/wakeuptime.py (I read it). The libbpf-tools/wakeuptime.c header I opened says LGPL-2.1 OR BSD-2-Clause, which differs from the GPL-3.0 the brief mentions. Check the header of whichever copy you use.) https://github.com/iovisor/bcc/blob/master/tools/wakeuptime.py
+  - bottlenecks: P5, P1, P2
+  - Counts and times wakeups keyed by (waker comm, target comm, waker kernel stack). That gives a waker-to-wakee edge count directly. Pair it with offwaketime for the blocked-side stack. The keys are comm names, so the Python version is already close to a per-edge table, provided PX4 threads have distinct names. The BPF_HASH(counts, struct key_t) with key waker+target+stack id is the part to reuse, in the tool, not as code to lift.
+  - speed claim: The man page says the events can exceed 1 million per second, so test overhead first (claim from the man page via search result, not measured).
+  - read: tools/wakeuptime.py lines 98-147 (key_t, counts, wakeup()), tools/wakeuptime.py lines 163-211 (raw_tracepoint sched_switch and sched_wakeup versus kprobe try_to_wake_up), tools/offwaketime.py, libbpf-tools/wakeuptime.bpf.c, man/man8/offwaketime.8
+- **bubblewrap (bwrap --unshare-net)** (rel 4, tool, GitHub says 'other'; I recall LGPL-2.0-or-later but did not open COPYING. If LGPL, use it as an external tool only and copy no text.) https://github.com/containers/bubblewrap
+  - bottlenecks: P6
+  - Gives each run a private loopback, so the fixed MAVLink port table and the 14549 cap stop mattering, with no root (needs user namespaces). A search result (microsoft/mxc PR 750) says bwrap --unshare-net brings up lo inside the sandbox and that a listener is visible only inside it. A dbus test notes name resolution can break under it. Also isolates /tmp lock files if --tmpfs /tmp is used. Pure launch-script change, no PX4 code.
+  - speed claim: none
+  - read: bubblewrap README (--unshare-net, --tmpfs, --unshare-pid, --die-with-parent), https://github.com/microsoft/mxc/pull/750 (loopback behaviour, from a search result, not opened)
+- **cpuidle-haltpoll driver + guest halt polling doc** (rel 4, source-file, GPL-2.0 (idea only)) https://github.com/torvalds/linux/blob/master/drivers/cpuidle/cpuidle-haltpoll.c
+  - bottlenecks: P1, P5
+  - Guest polls before HLT, sets the POLL flag so a waker skips the IPI and the HLT exit is avoided. Doc says default guest_halt_poll_ns is 200000 with adaptive grow/shrink. But the driver gates on kvm_para_available() (line 110), so it will NOT load on Hyper-V/WSL2 without a patch or force path; mechanism is liftable by a custom WSL kernel or emulated by idle=poll. Costs CPU burn.
+  - speed claim: none
+  - read: drivers/cpuidle/cpuidle-haltpoll.c: haltpoll_init, haltpoll_want, Documentation/virt/guest-halt-polling.rst, Documentation/virt/kvm/halt-polling.rst, LWN https://lwn.net/Articles/792618/ (patch series)
+- **crossbeam Backoff and Parker** (rel 4, library, MIT or Apache-2.0) https://github.com/crossbeam-rs/crossbeam
+  - bottlenecks: P1, P2
+  - Backoff is the cleanest compact spin/yield ladder: 1<<step pause instructions up to SPIN_LIMIT=6, then yield_now up to YIELD_LIMIT=10, then is_completed() tells the caller to block. Parker is a thread-parking token (park, park_timeout, unpark) over a futex/condvar. Easy to port to C++ in under 60 lines.
+  - speed claim: none
+  - read: crossbeam-utils/src/backoff.rs (spin, snooze, is_completed; SPIN_LIMIT, YIELD_LIMIT), crossbeam-utils/src/sync/parker.rs
+- **drivers/clocksource/hyperv_timer.c (stimer0 clockevent, hv clocksources)** (rel 4, source-file, GPL-2.0 (idea only)) https://github.com/microsoft/WSL2-Linux-Kernel/blob/linux-msft-wsl-6.6.y/drivers/clocksource/hyperv_timer.c
+  - bottlenecks: P1, P2, P5
+  - Every hrtimer programming (each usleep(100) in the P1 actuator wait and each pacing sleep in P2) ends in hv_ce_set_next_event, which does hv_set_msr(HV_MSR_STIMER0_COUNT), an MSR write that traps to the hypervisor (clockevent rating 1000, direct mode). This is a likely contributor to kernel time per tick, and an argument for replacing sleep-polling with a blocking wait that arms no timer, or a spin-wait for sub-100 us waits. Also shows hyperv_cs_tsc rating 500 vs hyperv_cs_msr 495 and the TSC_INVARIANT path that makes gettimeofday vDSO-fast.
+  - speed claim: none
+  - read: hv_ce_set_next_event (line ~78-85), hv_init_tsc_clocksource (~541), hyperv_cs_tsc / hyperv_cs_msr definitions (~488-511)
+- **esmini (OpenSCENARIO player and parameter distributions)** (rel 4, tool, MPL-2.0 (file-level copyleft; read for design, reimplement)) https://github.com/esmini/esmini
+  - bottlenecks: C11, C12
+  - Compact C++ OpenSCENARIO engine (Storyboard, Story, Act, Event, Action, Trigger with conditions and edges). OSCParameterDistribution implements OpenSCENARIO parameter variation: permutation count, set-index, increment-index, so a sweep is enumerated and each run indexed and reproducible (C12). Shows a standard, small C++ implementation of the event/trigger state machine.
+  - speed claim: none
+  - read: EnvironmentSimulator/Modules/ScenarioEngine/SourceFiles/Storyboard.cpp, StoryboardElement.cpp (state machine of events and triggers), EnvironmentSimulator/Modules/ScenarioEngine/SourceFiles/Action.cpp, EnvironmentSimulator/Modules/ScenarioEngine/OSCTypeDefs/OSCParameterDistribution.hpp/.cpp (GetNumP
+- **facebook/folly SaturatingSemaphore (+ Baton, LifoSem, WaitOptions)** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/facebook/folly/blob/985ebd5d0302afb0ba456f5fd867f467fef9745c/folly/synchronization/SaturatingSemaphore.h
+  - bottlenecks: P1, P5
+  - One-shot flag with spin-then-block and a per-call spin_max option, which is the 'poll hot for a few microseconds, then sleep on a futex' policy P1 needs. folly::Baton is built on it, and LifoSem uses it as the handoff. Pattern to lift: spin budget as a parameter, not hard-coded.
+  - speed claim: Header comment only: 'The default spin-max duration is 10 usec.' (a default, not a measurement)
+  - read: folly/synchronization/SaturatingSemaphore.h: wait(), try_wait_until(), post(), WaitOptions use, folly/synchronization/WaitOptions.h, folly/synchronization/detail/Spin.h, folly/synchronization/Baton.h, folly/synchronization/LifoSem.h (header comment on LIFO wake policy), folly/detail/Futex.h and Fute
+- **folly EventCount** (rel 4, library, Apache-2.0) https://github.com/facebook/folly/blob/main/folly/synchronization/EventCount.h
+  - bottlenecks: P1, P5
+  - Two-phase prepareWait / cancelWait / wait / notify protocol (derived from Vyukov's eventcount) lets the producer skip the wake syscall when no thread is waiting and lets a waiter re-check the predicate without a lost wakeup. Fits 'wait for uORB topic updated' where the publisher is hot and the consumer sometimes already has data. Eigen has a Vyukov-derived copy (Unsupported/ThreadPool EventCount.h, MPL-2.0) and gtsam vendors it.
+  - speed claim: none
+  - read: folly/synchronization/EventCount.h: prepareWait(), cancelWait(), wait(), notify(), notifyAll()
+- **fpv-sim (cheesejaguar): scenario JSON with scheduled sensor faults and seeded domain randomization** (rel 4, simulator, GPL (LICENSE text is GNU GPL; idea only)) https://github.com/cheesejaguar/fpv-sim
+  - bottlenecks: C11, C12, C3, C2
+  - A recent project that already does what C11/C12 ask: one JSON scenario with a seed, timed faults ({at, duration, kind, motor, axis, value}) for gyro_bias, gyro_noise, gyro_stuck, acc_bias, baro_drift, baro_failure, gps_loss, gps_degraded (error multiplied by value), mag_interference, battery_degraded, with a schema and a validator, and a Dist type (uniform, loguniform, normal, choice) for randomisation with a documented sampling function. Runs Betaflight in the loop and a PX4 MAVLink lockstep path per its PR description. Useful as a template for the fault vocabulary and the scenario file layout, not for code.
+  - speed claim: none
+  - read: docs/SCENARIO_FORMAT.md, schemas/scenario.v1.schema.json, src/sim/faults.ts (FAULT_KINDS lines 8-26, checkFaults), src/scenario/randomize.ts (Dist, sample, checkDist), src/sim/sensors.ts (Magnetometer, Rangefinder, OpticalFlow), scenarios/fault-motor-hover.json, scenarios/hover-randomized.json
+- **ftrace hist triggers on sched_waking (no BPF, in-kernel aggregation)** (rel 4, tool, GPL-2.0 (docs)) https://github.com/torvalds/linux/blob/master/Documentation/trace/histogram.rst
+  - bottlenecks: P5, P1
+  - Histogram triggers can key on common_pid, comm, event fields and common_stacktrace, and can build synthetic events with onmatch and wakeup_latency examples. Attaching 'hist:keys=common_pid.execname,pid' to events/sched/sched_waking would give waker-to-wakee counts inside the kernel with no extra tooling. That use is my inference. The doc confirms common_pid as a key (lines 665, 853) and common_stacktrace (38). I did not find or run a sched_waking example. Good fit for WSL2 if the kernel has CONFIG_HIST_TRIGGERS.
+  - speed claim: none
+  - read: Documentation/trace/histogram.rst: keys section (~line 38), 'wakeup_latency' synthetic event example (~lines 1824-1920), block_lat example (~lines 1955-1956), onmatch (~line 2194)
+- **futex2: futex_waitv and FUTEX_SWAP lineage** (rel 4, write-up, GPL-2.0 (idea only)) https://github.com/torvalds/linux/blob/master/Documentation/userspace-api/futex2.rst
+  - bottlenecks: P1, P5
+  - futex_waitv waits on up to 128 futexes and wakes on any: one SIH wait could cover actuator-ready, shutdown, and a timeout in one syscall instead of usleep polling. Google FUTEX_SWAP (patch series 2020, claim 5 to 10 times faster than wake-then-wait by migrating the woken task to the waker CPU; see https://lkml.iu.edu/hypermail/linux/kernel/2006.3/01136.html) is the direct-handoff idea; I did not confirm it was merged. Handoff idea can be emulated by pinning both threads to one CPU.
+  - speed claim: claim only: 5 to 10 times faster than wake-then-wait for FUTEX_SWAP, from the cover letter via Phoronix; no hardware or data seen, patches not confirmed merged.
+  - read: Documentation/userspace-api/futex2.rst, https://www.phoronix.com/news/Google-User-Thread-Futex-Swap, https://lore.kernel.org/all/20200803221510.170674-4-posk@posk.io/t/
+- **futex_waitv(2) syscall (Linux 5.16)** (rel 4, library, GPL-2.0 kernel (idea only); man page text under the man-pages licence) https://man7.org/linux/man-pages/man2/futex_waitv.2.html
+  - bottlenecks: P5, P1
+  - The kernel doc (v6.12 futex2.rst) confirms it waits on up to 128 futexes (values and addresses in struct futex_waitv) and returns the index of a woken one, with an absolute timeout and clockid. It is a MULTI-WAIT primitive and gives no wake-side batching: waking still costs one futex_wake per word. It helps a waiter that must watch several sources, for example an SIH thread waiting on 'actuator_outputs_sim ready' or 'shutdown' or 'sim-time tick' at once, and would replace the usleep(100) poll (P1) with a real block. Absolute timeout against CLOCK_MONOTONIC is not simulated time. All futexes must be 32-bit private. Wake-batching benefit: none found in the docs or source I read.
+  - speed claim: none
+  - read: Documentation/userspace-api/futex2.rst (v6.12), kernel/futex/syscalls.c: SYSCALL_DEFINE5(futex_waitv), tools/testing/selftests/futex/functional/futex_waitv.c, ValveSoftware/wine proton_9.0 dlls/ntdll/unix/fsync.c: futex_wait_multiple(), fsync_wait_objects()
+- **gem5 simulator: drain, checkpoint and m5.fork** (rel 4, simulator, BSD-3-Clause (can adapt with attribution)) https://github.com/gem5/gem5
+  - bottlenecks: P4, C11, C13
+  - Closest simulator analog to a lockstep SIH: simulate to a quiescent point with drain(), then either serialize state (checkpoint) or os.fork() the whole simulator (m5.fork) so many experiments start from one warmed-up state. m5.fork refuses when listeners (sockets) are enabled, the same constraint MAVLink sockets create. Per-object serialize/unserialize with named params gives a model for a state registry.
+  - speed claim: none
+  - read: src/python/m5/simulate.py: drain() (line ~433), checkpoint() (~479), fork() (~603), src/sim/serialize.cc and serialize.hh (paramOut/paramIn, Serializable), src/sim/serialize_handlers.hh
+- **glibc pthread_cond_broadcast (nptl)** (rel 4, source-file, LGPL-2.1-or-later (idea only)) https://github.com/bminor/glibc/blob/master/nptl/pthread_cond_broadcast.c
+  - bottlenecks: P5
+  - Read. Modern glibc broadcast does one futex_wake(INT_MAX) per condvar and does not requeue waiters onto the mutex, so a waiter woken while the master still holds passed_lock wakes, blocks on the mutex, and wakes again. That is a candidate source of the extra voluntary switches. This is a hypothesis to test with perf trace or bcc wakeuptime. Fix options: broadcast after unlock where the lost-wakeup rules allow, or drop pthread_cond for a futex word.
+  - speed claim: none
+  - read: nptl/pthread_cond_broadcast.c: ___pthread_cond_broadcast, futex_wake(...INT_MAX...), nptl/pthread_cond_wait.c: __pthread_cond_wait_common (mutex re-acquire after wake)
+- **gnss-ins-sim (Aceinna)** (rel 4, simulator, MIT) https://github.com/Aceinna/gnss-ins-sim
+  - bottlenecks: C2, C3, C12
+  - MIT-licensed Python tool with named IMU accuracy grades ('low-accuracy', 'mid-accuracy', 'high-accuracy'), a dict-based error model (bias, bias instability with correlation time, ARW/VRW, scale, misalignment), GPS and magnetometer and odometer error models, and an Allan-variance demo. It makes a good catalogue of IMU grade presets and can serve as a reference generator to test a C++ port against. Not for flight hardware.
+  - speed claim: none
+  - read: gnss_ins_sim/sim/imu_model.py (IMU class, set_gyro_error, set_accel_error, set_gps, set_mag_error, odo_low_accuracy), gnss_ins_sim/pathgen/pathgen.py, demo_allan.py
+- **gym-pybullet-drones** (rel 4, simulator, MIT (copyable with attribution)) https://github.com/learnsyslab/gym-pybullet-drones
+  - bottlenecks: C6, C8, C14
+  - Small closed-form effects added on top of a rigid body as external forces: per-propeller ground effect, aerodynamic drag, and inter-drone downwash, selectable by a Physics enum (PYB, DYN, PYB_GND, PYB_DRAG, PYB_DW, PYB_GND_DRAG_DW). Formulas are a few lines each, cheap enough for the SIH step. Also separates PYB_FREQ from CTRL_FREQ with an integer steps-per-control ratio.
+  - speed claim: none
+  - read: gym_pybullet_drones/envs/BaseAviary.py (_groundEffect ~line 712, _drag ~751, _downwash ~782, _dynamics ~812, PYB_STEPS_PER_CTRL ~81, step loop ~342), gym_pybullet_drones/utils/enums.py (Physics)
+- **gym-pybullet-drones (utiasDSL)** (rel 4, simulator, MIT (LICENSE file, Copyright 2020 Jacopo Panerati)) https://github.com/utiasDSL/gym-pybullet-drones
+  - bottlenecks: C6, C9
+  - Concrete per-rotor ground effect and downwash. _groundEffect() uses rpm^2*KF*GND_EFF_COEFF*(R/(4h))^2 with the height clipped (GND_EFF_H_CLIP), which is the Cheeseman-Bennett form in a few lines, a per-propeller loss curve indexed by rotor height. _drag() and _downwash() between drones are also there. Small enough to lift.
+  - speed claim: none
+  - read: gym_pybullet_drones/envs/BaseAviary.py: _groundEffect (line about 712), _drag, _downwash, GND_EFF_H_CLIP (line about 128)
+- **iceoryx (classic, iceoryx_hoofs/iceoryx_posh)** (rel 4, library, Apache-2.0 (adaptable with attribution)) https://github.com/eclipse-iceoryx/iceoryx
+  - bottlenecks: P1, P5
+  - C++ reference for lock-free SPSC (SOFI, safely overflowing FIFO) and MPMC index queues plus ConditionVariableData/ConditionNotifier/ConditionListener and WaitSet, a C++ analogue of what uORB poll/SubscriptionCallback do. Closest-to-PX4 language and style, so the easiest to lift for a signalling primitive that wakes the SIH thread when actuator_outputs_sim is published, and for a bounded overflowing queue as a lock-free alternative to uORB queued topics.
+  - speed claim: README claims 'constant latency regardless of the size of the payload'; no figure found in the README.
+  - read: iceoryx_hoofs/concurrent/buffer/include/iox/detail/spsc_sofi.hpp and .inl, iceoryx_hoofs/concurrent/buffer/include/iox/detail/mpmc_lockfree_queue/mpmc_index_queue.inl, iceoryx_posh/include/iceoryx_posh/internal/popo/building_blocks/condition_variable_data.hpp, condition_notifier.hpp, condition_liste
+- **io_uring futex ops (IORING_OP_FUTEX_WAKE / WAIT / WAITV, Linux 6.7)** (rel 4, library, liburing: GitHub detects MIT; man page headers say LGPL-2.0-or-later (dual LGPL-2.1 or MIT as I recall; verify the LICENSE file). Kernel io_uring/futex.c is GPL-2.0 (idea only).) https://github.com/axboe/liburing/blob/master/man/io_uring_prep_futex_wake.3
+  - bottlenecks: P5, P1
+  - The only mechanism I found that wakes many DIFFERENT futex words in one syscall: queue N IORING_OP_FUTEX_WAKE SQEs and submit with one io_uring_enter. Per the man page it is available since 6.7 and takes val, mask and futex_flags. IORING_OP_FUTEX_WAITV lets one ring wait on a vector of futexes. It costs a ring and kernel completion path, so it needs measuring against plain futex_wake per waiter. SQPOLL would remove the syscall but burns a CPU. It is Linux-only and needs kernel 6.7 or later, so it can only be an optional backend and cannot be on the default path. Check the running WSL kernel version, which I could not.
+  - speed claim: none
+  - read: liburing man/io_uring_prep_futex_wake.3, io_uring_prep_futex_waitv.3, io_uring_prep_futex_wait.3, liburing test/futex.c, test/futex-kill.c, linux io_uring/futex.c: io_futex_wake(), io_futexv_wait(), io_futex_wake_fn()
+- **libcosim (Open Simulation Platform) fixed-step algorithm and scenario manager** (rel 4, library, MPL-2.0 (file-level copyleft: modified MPL files must stay MPL; reimplement the idea for BSD-3 code)) https://github.com/open-simulation-platform/libcosim
+  - bottlenecks: P5, P7, C10, C11, C12, C14
+  - An FMI co-simulation master with three directly useful parts. fixed_step_algorithm runs each step as pool_.submit per simulator then pool_.wait_for_tasks_to_finish (the 'all finished' barrier) and uses a decimation factor so slow models step every N base steps (multi-rate). scenario / scenario_parser / scenario_manager is a JSON scenario file that sets or overrides variables at given simulated times with an optional end time: a ready design for C11 and C10. observer classes (file, time series, last value) show a results-recording layer for C12.
+  - speed claim: none
+  - read: src/cosim/algorithm/fixed_step_algorithm.cpp (calculate_decimation_factor, thread pool at lines ~54-181), include/cosim/scenario.hpp, scenario_parser.hpp, manipulator/scenario_manager.hpp, manipulator/override_manipulator.hpp, include/cosim/observer/file_observer.hpp, time_series_observer.hpp, src/c
+- **m-ou-se/atomic-wait (minimal futex-backed wait/wake per platform)** (rel 4, library, BSD-2-Clause) https://github.com/m-ou-se/atomic-wait
+  - bottlenecks: P1, P5
+  - About five small files, one per OS (linux.rs, freebsd.rs, macos.rs, windows.rs), each exposing wait(a, expected), wake_one, wake_all over an AtomicU32. Shows the smallest portable 'wait until this word changes' layer, which is the C++20 std::atomic::wait idea. A SIH version would use futex on POSIX SITL and fall back to px4_sem on NuttX.
+  - speed claim: none
+  - read: src/linux.rs (SYS_futex FUTEX_WAIT|PRIVATE, FUTEX_WAKE), src/macos.rs, src/lib.rs
+- **madsim global deterministic RNG with draw log and determinism check** (rel 4, library, Apache-2.0) https://github.com/madsim-rs/madsim/blob/519950efb4711464f300ed7edf2967ed62d5f502/madsim/src/sim/rand.rs
+  - bottlenecks: C1, C13, P8
+  - Every RNG draw can record one byte (a draw hash xored with simulated time); a second run with the same seed is checked against that log and panics at the first divergent draw ('non-determinism detected at <time>'). Cheap way for SIH to prove that a refactor did not change draw order. Also seeds libc/std hash state, runs ready tasks in seeded random order (try_recv_random) and advances simulated time 50-100 ns per poll, which is a pattern for modelling jitter in the sim clock.
+  - speed claim: none
+  - read: madsim/src/sim/rand.rs: GlobalRng::with (log/check branch), enable_log, enable_check, take_log, buggify, init_std_random_state, madsim/src/sim/runtime/mod.rs: Runtime::check_determinism (~line 178), madsim/src/sim/task/mod.rs: run_all_ready and the 50..100 ns advance (~263-321)
+- **mcardupilot (flock-leased SITL instance pool)** (rel 4, tool, unknown (PyPI metadata gives none; check source)) https://pypi.org/project/mcardupilot/
+  - bottlenecks: P6
+  - Hands out SITL instance numbers from a shared pool via flock leases that the kernel drops when the holder exits, so a crashed run never strands an instance; each instance number maps to fixed ports (5760+10n, 9002+10n). A crash-safe replacement for per-instance /tmp lock files and the global pkill.
+  - speed claim: none
+  - read: PyPI description 'Several sessions on one workstation fly SITL at the same time', source of the lease module (package sdist, not opened)
+- **microsoft/WSL2-Linux-Kernel, config for 6.6 and 6.18 branches** (rel 4, source-file, GPL-2.0 (idea only, no text copy)) https://github.com/microsoft/WSL2-Linux-Kernel
+  - bottlenecks: P5, P1, P2
+  - Ground truth for what the stock guest kernel does. I read arch/x86/configs/config-wsl on linux-msft-wsl-6.6.y: CONFIG_HZ=250, NO_HZ_IDLE (not NO_HZ_FULL), PREEMPT_NONE with PREEMPT_DYNAMIC, CPU_IDLE_GOV_MENU (TEO not set), CONFIG_HALTPOLL_CPUIDLE=y, CONFIG_RETPOLINE=y plus MITIGATION_* options, PARAVIRT_SPINLOCKS=y, CPU_FREQ default governor performance, SCHED_MC/SCHED_SMT/NUMA=y. The 6.18 branch has the same HZ/NO_HZ/PREEMPT_NONE and SCHED_CLASS_EXT not set. Candidate custom-kernel changes: HZ, NO_HZ_FULL or nohz_full for the SIH CPUs, TEO governor, sched_ext. Note Microsoft/config-wsl is a symlink to arch/x86/configs/config-wsl.
+  - speed claim: none
+  - read: arch/x86/configs/config-wsl (branches linux-msft-wsl-6.6.y, linux-msft-wsl-6.18.y), Microsoft/scripts/gen_modules_vhdx.sh (module VHDX for custom kernel), arch/x86/hyperv/hv_apic.c, drivers/clocksource/hyperv_timer.c
+- **mjlab dr module (typed domain randomization over MuJoCo Warp)** (rel 4, library, Apache-2.0) https://github.com/mujocolab/mjlab
+  - bottlenecks: C7, C6, C12, C10, P7
+  - Each randomization function is decorated to declare which model fields must become per-world, and which derived quantities must be recomputed (RecomputeLevel). SIH needs the same rule: change mass or inertia live and the stored inverse inertia must be refreshed. Also has a pseudo-inertia randomization example that keeps inertia physically valid, and a one-event-per-variable layout with abs/add/scale operations and distributions.
+  - speed claim: none
+  - read: src/mjlab/envs/mdp/dr/_core.py (requires_model_fields, RecomputeLevel), src/mjlab/envs/mdp/dr/body.py, actuator.py, joint.py, docs/source/randomization.rst, events.rst, curriculum.rst
+- **moodycamel LightweightSemaphore / ConcurrentQueue** (rel 4, library, GitHub reports 'other'. README (not opened) says dual simplified-BSD / Boost; verify before copying. Either way the idea can be reimplemented.) https://github.com/cameron314/concurrentqueue
+  - bottlenecks: P1, P2, P5
+  - lightweightsemaphore.h has waitWithPartialSpinning: spin a bounded count on an atomic, then fall back to a futex/semaphore sleep, with an optional timeout. This is the standard fix for usleep(100) polling. The SIH thread would wait on an actuator-ready signal that spins briefly and then sleeps, which cuts latency and avoids a wake-up per poll. It is directly relevant to 'what should a time master wait on'.
+  - speed claim: none
+  - read: lightweightsemaphore.h: class LightweightSemaphore, waitWithPartialSpinning (around lines 280-390, m_maxSpins), and the platform Semaphore classes at lines 78-250
+- **perf bench sched pipe / futex-wake / futex-wake-parallel / sched-messaging** (rel 4, tool, GPL-2.0 (use as tool)) https://github.com/torvalds/linux/tree/master/tools/perf/bench
+  - bottlenecks: P5, P1
+  - Ready-made microbenchmarks to measure this exact VM: sched-pipe gives two-thread wake round trip, futex-wake and futex-wake-parallel time waking N waiters, run pinned and unpinned (taskset) to quantify same-CPU vs cross-CPU wake cost on WSL2 before redesigning. Also validates the lockstep fan-out cost.
+  - speed claim: none
+  - read: tools/perf/bench/sched-pipe.c, tools/perf/bench/futex-wake.c, tools/perf/bench/futex-wake-parallel.c, tools/perf/bench/sched-messaging.c
+- **rigtorp/Seqlock** (rel 4, library, MIT (adaptable with attribution)) https://github.com/rigtorp/Seqlock
+  - bottlenecks: P5, P1
+  - Single-writer, many-reader latest-value cell where the writer never blocks and does no atomic read-modify-write. That is the shape of every queue=1 uORB topic, and uORB currently has a node lock plus ATOMIC_ENTER in places. Candidate for the SIH ground-truth topics on SITL builds. Caveat: a preempted writer stalls readers, and the payload must be trivially copyable (uORB messages are).
+  - speed claim: none
+  - read: include/rigtorp/Seqlock.h (store/load) and the multithreaded torn-read fuzz test in src/
+- **rigtorp/ipc-bench** (rel 4, tool, MIT (adaptable with attribution)) https://github.com/rigtorp/ipc-bench
+  - bottlenecks: P1, P2, P5
+  - A ready ping-pong latency harness for pipes, Unix sockets, TCP, eventfd and io_uring MSG_RING. Use it on the WSL machine to put a number on what one wake-up costs there, which decides whether replacing usleep(100) with an eventfd or futex wake is worth doing. There is a fork with a futex_lat.c.
+  - speed claim: none
+  - read: README.md, eventfd_lat.c, io_uring_lat.c, pipe_lat.c
+- **rslcpp (deterministic ROS 2 simulation loop with explicit clock)** (rel 4, runner-or-infrastructure, Apache-2.0) https://github.com/TUMFTM/rslcpp
+  - bottlenecks: P3, P5, C14, C11
+  - Runs a normal ROS 2 node graph in a single-threaded loop with an explicit simulation clock that jumps to the next scheduled event (timer/delayed callback), no wall-clock waiting, plus CSV-configured deterministic or probabilistic topic delays and a Job that owns start time, termination condition and exit code. Closest robotics analogue to SIH lockstep: shows event-driven time advance (instead of fixed-step polling) and a 'Job returns exit code' scenario layer.
+  - speed claim: none
+  - read: README.md (Core ideas: Job, Simulation clock, Deterministic callback execution, Optional topic delays), the custom executor and clock sources in the repo (not opened), paper doi 10.1109/RAP.2026.3704080 (cited in README, not opened)
+- **safe-control-gym (LSY)** (rel 4, library, MIT) https://github.com/learnsyslab/safe-control-gym
+  - bottlenecks: C1, C8, C11, C12
+  - Gives a ready design for a disturbance and experiment layer: a Disturbance base class with reset/apply/seed, DisturbanceList for composing channels, ImpulseDisturbance, StepDisturbance, UniformNoise etc., all constructed from YAML config; plus randomized inertial parameters and per-env seeding via config_overrides and an examples tree that sweeps controllers across configs. The class shape (time-triggered impulse and step, per-channel mask, own seed) is the mechanism for C8 and C11.
+  - speed claim: none
+  - read: safe_control_gym/envs/disturbances.py (Disturbance, DisturbanceList, ImpulseDisturbance, StepDisturbance, UniformNoise), safe_control_gym/envs/gym_pybullet_drones/quadrotor.py, examples/*/config_overrides/quadrotor_3D/*.yaml, safe_control_gym/envs/benchmark_env.py
+- **scipy.stats.qmc (Sobol with scrambling, Halton, LHS, Poisson disk)** (rel 4, library, BSD-3-Clause) https://github.com/scipy/scipy/blob/c818f76bf5be4aa8418ddcc3f7915de457eb0754/scipy/stats/_qmc.py
+  - bottlenecks: C1, C12
+  - Seedable low-discrepancy sampling with scale() to bounds, discrepancy() to compare designs, and fast_forward/reset so a sweep can be extended or replayed by index. Gives replay from a seed (C12) with a one-line API.
+  - speed claim: none
+  - read: scipy/stats/_qmc.py: Sobol, Halton, LatinHypercube, PoissonDisk, discrepancy, scale, scipy/stats/_qmc_cy.pyx
+- **scipy.stats.qmc (Sobol, Halton, Latin hypercube, discrepancy)** (rel 4, library, BSD-3-Clause) https://github.com/scipy/scipy
+  - bottlenecks: C12, C1
+  - Scrambled Sobol with Joe-Kuo direction numbers, Halton, LHS, and discrepancy measure to choose a sampling plan; seed-reproducible. The direction-number table and the Gray-code generator are small enough to port to C++ for an in-process sweep sampler.
+  - speed claim: none
+  - read: scipy/stats/_sobol.pyx, scipy/stats/_sobol_direction_numbers.npz, scipy/stats/_qmc.py (Sobol, Halton, LatinHypercube, discrepancy), scipy/stats/_qmc_cy.pyx
+- **shawnfeng0/uorb** (rel 4, library, MIT (adaptable with attribution)) https://github.com/shawnfeng0/uorb
+  - bottlenecks: P1, P5
+  - A POSIX-based redesign of PX4's uORB as a standalone library with an event loop component (uevent) and a bridge (uorb_uevent) so subscribers wait on epoll-style event sources instead of poll loops. Directly comparable code to what we want to change, so differences from PX4's DeviceNode (locking, callbacks, event loop) are ready-made hints.
+  - speed claim: none
+  - read: ARCHITECTURE.md, src/device_node.cc, components/uevent/src/uevent.cc and event_poll.h, components/uorb_uevent/src/uorb_uevent.cc, include/uorb/subscription.h
+- **skysim (ID-Robots): headless multi-vehicle ArduPilot SITL physics server on Jolt Physics** (rel 4, simulator, GPL-3.0 per GitHub search metadata (not verified in LICENSE file); ideas only) https://github.com/ID-Robots/skysim
+  - bottlenecks: P1, P6, P7, C13
+  - Single physics process serves many arducopter instances over the JSON UDP protocol. It has a strict lockstep mode that gives byte-identical truth logs for the same inputs (a model for C13 golden traces), and an interactive wall-clock mode that freezes stragglers instead of stalling the fleet (a model for what a time master should do when one peer is slow). Reports a many-vehicles-per-core design.
+  - speed claim: claim, README: '~200 quads @ 800 Hz on a single physics core, with ~5x realtime headroom'. Hardware not stated. Source: https://github.com/ID-Robots/skysim README
+  - read: README 'How it works' and lockstep/interactive sections, the UDP JSON servo-to-reply loop and the straggler-freeze logic (file names not looked up)
+- **tokio time wheel (runtime/time/wheel)** (rel 4, library, MIT) https://github.com/tokio-rs/tokio/tree/master/tokio/src/runtime/time/wheel
+  - bottlenecks: P5, P3
+  - Hierarchical wheel with 64 slots per level and a u64 'occupied' bitmask per level; next_expiration() finds the next due slot with rotate_right plus trailing_zeros, giving an O(1) answer to 'what is the next deadline'. This is the exact piece a virtual-time master needs to jump to the next event. Existing entries cover tokio's paused-time auto-advance, not this wheel, so read it for the structure. MIT.
+  - speed claim: none
+  - read: tokio/src/runtime/time/wheel/level.rs: Level::next_expiration(), next_occupied_slot(), add_entry(), remove_entry(), slot_for(), tokio/src/runtime/time/wheel/mod.rs: Wheel::poll(), next_expiration(), insert()
+- **wPerf (OSUSysLab) - wait-for graph off-CPU profiler, OSDI 2018** (rel 4, tool, none (repository has no license file; the GitHub API reports none, so reimplement the idea only)) https://github.com/OSUSysLab/wPerf
+  - bottlenecks: P5, P1
+  - The only tool found that builds the thread-to-thread wait-for graph from wakeup events and then ranks which waiting edge limits throughput (cascaded redistribution plus knot detection). That is the 'which edge do I remove first' step after a flat per-thread switch count. Its annotation hook (uds_add) also covers waits that never reach the kernel, which would cover SIH's polling usleep(100) loops and any spin waits. The repo is old (kernel 4.4-4.13, Python 2, kernel module), so lift the algorithm, not the code.
+  - speed claim: none
+  - read: README.md (design summary), analyzer/Analyzer.java and analyzer/knot.sh (graph build and knot detection), analyzer/bottleneck.py, recorder/recorder.c, annotation/c/thread.c (uds_add annotation of non-kernel waits), paper: https://www.usenix.org/system/files/osdi18-zhou.pdf (URL taken from the README
+- **wahern/timeout (timeout.c)** (rel 4, library, MIT (header of timeout.c, read directly; the GitHub licence field is empty)) https://github.com/wahern/timeout
+  - bottlenecks: P5, P3
+  - Tickless hierarchical timing wheel in plain C with no threads and no clock of its own: the caller feeds time through timeouts_update()/timeouts_step(), so it can be driven directly by the simulated clock. timeouts_timeout() returns the time to the next expiry, so a lockstep master can jump straight to the next deadline instead of stepping empty ticks. Small enough to fit a flash-limited build. MIT licence, text can be adapted with attribution.
+  - speed claim: none
+  - read: timeout.c: timeouts_add(), timeouts_del(), timeouts_update(), timeouts_step(), timeouts_timeout(), timeouts_get(), timeouts_expired(), timeout.h for the API and wheel size macros (WHEEL_BIT, WHEEL_NUM)
+- **wgu93/AirSim-GE (MultiRotorGroundEffect.hpp)** (rel 4, source-file, Fork of AirSim (upstream MIT). The GitHub API reported no license for the fork and no LICENSE file at its root, so treat it as unlicensed for copying: reimplement from the published equations, and Cheeseman-Bennett itself is a published formula.) https://github.com/wgu93/AirSim-GE
+  - bottlenecks: C6, C7, C9
+  - A compact C++ ground-effect module for multirotors with two selectable models: Cheeseman-Bennett (T_IGE/T_OGE = 1/(1-(R/4Z)^2)) and Conyers' parametric model, with a Z/R clamp (min 0.25, max 10). Reads altitude above ground and the current z wrench, returns a thrust delta. Closed-form, a few flops per step, no allocations, so it fits SIH's per-step budget and flash limits when written as a default-off option (identical behaviour at defaults).
+  - speed claim: none
+  - read: AirLib/include/vehicles/multirotor/MultiRotorGroundEffect.hpp: getRatioCheesemanBennettModel(), the Conyers parametric branch, the thrust-delta computation (T_OGE taken from body + drag wrench z), AirLib/include/vehicles/multirotor/fig/*ground-effect* plots comparing the two models
+- **xcp-lite and XCPlite (Vector, ASAM XCP for embedded and Rust)** (rel 4, library, Apache-2.0 (xcp-lite); MIT (XCPlite)) https://github.com/vectorgrp/xcp-lite
+  - bottlenecks: C10, C12, P5
+  - Calibration segments: a RAM page and a default (FLASH) page with a shadow copy per reader. The tool writes the page, and the real-time reader syncs at a safe point between cycles, so a parameter changes atomically at a step boundary with no locking in the hot loop. This is the XCP answer to C10 (exact-time parameter apply) and gives a switch-to-defaults. DAQ shows how to record chosen variables at fixed event rates with low overhead. The C core XCPlite is MIT; xcp-lite is Apache-2.0.
+  - speed claim: none
+  - read: xcp-lite/src/xcp/cal.rs (CalSeg, sync, page switching), xcp-lite/src/xcp/daq.rs, vectorgrp/XCPlite: C core (xcpLite.c, cal segment code; filenames not listed yet)
+- **xoshiro / xoroshiro / SplitMix (Vigna)** (rel 4, library, Page shows 'All rights reserved' notice but the reference C files are CC0/public-domain dedicated in file headers (check each header before copying)) https://prng.di.unimi.it/
+  - bottlenecks: C1, P7
+  - Reference public-domain generators and SplitMix64 seeding advice. xoshiro128++ is the 32-bit choice for MCUs without 64-bit speed; jump functions give non-overlapping streams in constant time (sqrt-of-period and 'parallel processors' jumps). SIH could use one xoshiro128++ per noise channel seeded by SplitMix of (seed, channel).
+  - speed claim: xoshiro256++ 0.58 ns per 64 bits (GCC and Clang), AMD EPYC 9R45 (Zen 5) at 4.5 GHz, one core, min of 5 runs - prng.di.unimi.it; ChaCha20 4.55 ns (GCC) in the same table
+  - read: https://prng.di.unimi.it/ xoshiro256plusplus.c, xoshiro128plusplus.c, splitmix64.c (headers)
+- **ASAM OpenSCENARIO (standard, qc checker, API tests)** (rel 3, write-up, ASAM standard (spec terms apply); tooling MPL-2.0 / Apache-2.0) https://www.asam.net/standards/detail/openscenario/
+  - bottlenecks: C11, C12
+  - The industry vocabulary for scenario files: parameter declarations, ParameterSetAction/ModifyAction, Storyboard/Story/Act/ManeuverGroup/Event/Action, start and stop triggers with condition edges (rising, falling, none), delay, priority. Useful to copy names and semantics, not the XML. Open-source tooling: asam-ev/qc-openscenarioxml (MPL-2.0) and RA-Consulting-GmbH/openscenario.api.test (Apache-2.0, repo not opened beyond metadata).
+  - speed claim: none
+  - read: asam.net OpenSCENARIO 1.x user guide: Storyboard, Trigger, ConditionEdge, ParameterAction, https://github.com/asam-ev/qc-openscenarioxml
+- **AirSim MavLinkMultirotorApi lockstep (with actuator-delay and lock-step-reset telemetry)** (rel 3, source-file, MIT) https://github.com/microsoft/AirSim/blob/master/AirLib/include/vehicles/multirotor/firmwares/mavlink/MavLinkMultirotorApi.hpp
+  - bottlenecks: P1, P8, C14
+  - A lockstep with PX4 via HIL_SENSOR: the sensor step is dropped until HIL_ACTUATOR_CONTROLS arrives; a 1-second watchdog drops out of lockstep and counts lock_step_resets; it also records actuator_delay and update_time per sensor message. A frozen-time watchdog plus counters is what P8 lacks. AirLib also has SteppableClock and ScalableClock behind a ClockFactory.
+  - speed claim: none
+  - read: MavLinkMultirotorApi.hpp: update() lines 119-175, getSimTime/advanceTime 107-117, telemetry around 660-710, AirLib/include/common/SteppableClock.hpp, ScalableClock.hpp, ClockFactory.hpp
+- **Android Zygote (and ART no-threads-in-zygote guard)** (rel 3, source-file, Apache-2.0 (AOSP)) https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/jni/com_android_internal_os_Zygote.cpp
+  - bottlenecks: P4, P6
+  - Fork-without-exec after preloading shared state, specialize the child afterward (SpecializeCommon). Zygote enforces single-threadedness at fork time and ART has a flag that fails thread creation inside the zygote section, proving the fork-server rule can be enforced by code rather than by convention.
+  - speed claim: none
+  - read: core/jni/com_android_internal_os_Zygote.cpp: ForkCommon/SpecializeCommon (~line 1891), core/java/com/android/internal/os/ZygoteInit.java (preload), platform/art change f38a661 'Flag to fail thread creation'
+- **Apache Kafka timer (TimingWheel, SystemTimer, TimerTaskList)** (rel 3, library, Apache-2.0) https://github.com/apache/kafka/tree/trunk/server-common/src/main/java/org/apache/kafka/server/util/timer
+  - bottlenecks: P5
+  - Reference hierarchical wheel plus a DelayQueue holding only the non-empty bucket lists, so the driver thread sleeps until the earliest non-empty bucket and not every tick. That 'queue of buckets, not of timers' trick is directly usable: one ordered structure over non-empty buckets lets the time master test 'is anything due' with one comparison. The O(m) insert / O(1) delete figures the task quotes come from Kafka's wiki, which I did not open. Apache-2.0.
+  - speed claim: none
+  - read: TimingWheel.java: add(), advanceClock(), SystemTimer.java: add(), advanceClock(), reinsert(), TimerTaskList.java
+- **ArduPilot SITL JSON backend: lockstep, no_lockstep and no_time_sync switches** (rel 3, source-file, GPL-3.0 (reimplement only)) https://github.com/ArduPilot/ardupilot/blob/b0af1735b8fec3d00458d8347d5ef2a9ffe43b83/libraries/SITL/SIM_JSON.cpp
+  - bottlenecks: P1, P3, C14
+  - The external physics side owns the clock via a timestamp in the reply packet, and the flight side blocks on UDP recv with a timeout (recv_fdm). A no_lockstep switch lets the same binary fall back to loop-rate time advance when no data arrives. The timeout/fallback logic could inform a lockstep watchdog for SIH, and the packet carries frame_rate and frame_count for the peer to check step identity. The JSON example folder also holds MATLAB, C++ and pybullet physics backends.
+  - speed claim: none
+  - read: libraries/SITL/SIM_JSON.cpp: recv_fdm() lines 301-330, lockstep handling 405-430, timestamp to time_now_us 505-527, send frame_rate/frame_count 105-125, libraries/SITL/examples/JSON/readme.md and examples/JSON/C++/minimal.cpp
+- **ArduPilot SITL SIM_JSON external-physics backend and JSON_Master** (rel 3, source-file, GPL-3.0 (example client code in examples/JSON may carry its own header; check)) https://github.com/ArduPilot/ardupilot/tree/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/SITL/examples/JSON
+  - bottlenecks: P1, P3, P6, C14
+  - UDP lockstep protocol where the external sim sends timestamp, IMU, position, quaternion, with explicit no_time_sync and no_lockstep flags that can switch lockstep off at run time; recv_fdm blocks with UDP_TIMEOUT_MS and, in no_lockstep mode, advances time by 1/loop_rate_hz instead of blocking. SIM_JSON_MASTER lets a second autopilot instance follow one physics instance (multi-vehicle on one sim). Useful as the contract for a swappable physics backend and as a model of 'what a time master waits on' (one datagram per step, with timeout fallback).
+  - speed claim: none
+  - read: libraries/SITL/SIM_JSON.cpp: recv_fdm (303-330), the no_time_sync/no_lockstep handling (~407-430), update (~504-521, ~604-613), libraries/SITL/SIM_JSON_Master.cpp, libraries/SITL/examples/JSON/C++/minimal.cpp and readme.md
+- **ArduPilot SITL battery model (SIM_Battery.cpp) and EvaluateBatteryModel/EvaluateMotorModel examples** (rel 3, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/tree/b7c08d4dbc69f58f5636642698b63a9130725db6/libraries/SITL/examples/EvaluateBatteryModel
+  - bottlenecks: C6, C13
+  - 40-point Li-ion state-of-charge versus cell voltage table with linear interpolation, internal resistance sag (BATT_RES_OHM), capacity (BATT_CAP_AH), set voltage (BATT_VOLTAGE), and a maximum-permitted dt guard. Fits in a few hundred bytes of flash. The two Evaluate* examples are standalone programs with README and plots that sweep the model offline, an example of a model-level regression check kept out of the full sim.
+  - speed claim: none
+  - read: libraries/SITL/SIM_Battery.cpp: soc_table, get_resting_voltage, compute_remaining_Ah, set_current, libraries/SITL/examples/EvaluateBatteryModel/README.md and EvaluateBatteryModel.cpp, libraries/SITL/examples/EvaluateMotorModel/README.md and EvaluateMotorModel.cpp
+- **ArduPilot Tools/Replay (log replay and check_replay)** (rel 3, tool, GPL-3.0 (ideas only)) https://github.com/ArduPilot/ardupilot/tree/b0af1735b8fec3d00458d8347d5ef2a9ffe43b83/Tools/Replay
+  - bottlenecks: C13, P4
+  - Replays logged sensor data through the estimator and compares outputs, with check_replay.py as a regression gate. The pattern for proving a change did not alter behaviour: feed a recorded input stream, hash or diff the outputs. Useful for a SIH golden-trace gate.
+  - speed claim: none
+  - read: Tools/Replay/check_replay.py, Tools/Replay/check_replay_branch.py, Tools/Replay/CheckLogs.py, Tools/Replay/Replay.cpp, Tools/Replay/LogReader.cpp
+- **ArduPilot Tools/Replay and check_replay.py (log-based determinism check)** (rel 3, tool, GPL-3.0) https://github.com/ArduPilot/ardupilot/tree/b7c08d4dbc69f58f5636642698b63a9130725db6/Tools/Replay
+  - bottlenecks: C13
+  - Re-runs the estimator on a flight log and compares its outputs (NKF/XKF message groups) with those logged, with an accuracy tolerance and an ignore set, failing on mismatch. This is the integrity-check pattern the owner needs: prove a change did not alter behaviour by comparing recorded traces. Pair with the autotest run_replay hook. Idea only (GPLv3).
+  - speed claim: none
+  - read: Tools/Replay/check_replay.py: check_log (line 9), message group lists (21-22), mismatch logic (55-73), Tools/Replay/Replay.cpp, LogReader.cpp, Tools/autotest/vehicle_test_suite.py: run_replay (16502)
+- **ArduPilot Tools/autotest/arducopter.py failure-injection test cases** (rel 3, source-file, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/Tools/autotest/arducopter.py
+  - bottlenecks: C11, C2, C4, C6, C8
+  - A library of several hundred worked scenarios, each pairing a SIM_ parameter set with a pass criterion, for example gyro/accel failure, bias, noise, vibration spectra, magnetometer failure and offsets, motor failure with efficiency loss, low battery voltage, wind, shove. Mine it as a list of expectation thresholds and scenario recipes to rebuild as data (parameter set + trigger time + pass condition) for a PX4 SIH scenario layer. Copying text is not allowed (GPLv3); the parameter names and thresholds are facts to reimplement.
+  - speed claim: none
+  - read: Tools/autotest/arducopter.py: grep for SIM_ and set_parameters; tests() list at the end of the file, Tools/autotest/vehicle_test_suite.py: Test class and tests list conventions
+- **ArduPilot autotest framework (Tools/autotest)** (rel 3, runner-or-infrastructure, GPL-3.0 (ideas only)) https://github.com/ArduPilot/ardupilot/tree/b0af1735b8fec3d00458d8347d5ef2a9ffe43b83/Tools/autotest
+  - bottlenecks: P3, P6, C11, C13
+  - A mature scenario layer: Python tests drive SITL over MAVLink, set parameters at chosen moments, inject failures, wait on conditions with timeouts expressed in simulated time, and exit with a pass/fail status. Has a --speedup option applied across a whole suite. Good template for the scenario supervisor SIH lacks (C11) and for how timeouts are scaled with speed (P3).
+  - speed claim: none
+  - read: Tools/autotest/vehicle_test_suite.py (wait_* helpers, set_parameter, assert_* helpers), Tools/autotest/autotest.py (suite orchestration, --speedup), Tools/autotest/sim_vehicle.py, Tools/autotest/pysim/util.py, docs: https://www.ardupilot.org/dev/docs/the-ardupilot-autotest-framework.html
+- **ArduPilot sim_vehicle.py multi-instance launch and pysim/util.py start_SITL** (rel 3, tool, GPL-3.0) https://github.com/ArduPilot/ardupilot/blob/b7c08d4dbc69f58f5636642698b63a9130725db6/Tools/autotest/sim_vehicle.py
+  - bottlenecks: P6, P4
+  - Per-instance port offsets (JSON backend port 9002 + 10n per a forum note; SITL servo port is SITL_SERVO_PORT + _instance in SITL_State.cpp:504), a separate working directory per instance for eeprom/parameters, and a launcher that starts N instances without a global pkill. Pattern for fixing P6. Not read in detail.
+  - speed claim: none
+  - read: Tools/autotest/sim_vehicle.py: instance and count options, Tools/autotest/pysim/util.py: start_SITL, libraries/AP_HAL_SITL/SITL_State.cpp: _instance, base_port usage
+- **Avis (in-situ model checking for UAV sensor failures)** (rel 3, paper, ) https://arxiv.org/abs/2106.14959
+  - bottlenecks: C3, C11, P4
+  - Injects sensor failures at operating-mode transitions and uses a systematic search over failure type and timing instead of random timing. A direct design for a SIH scenario trigger ('inject when the vehicle enters mode X'). The search over failure timing is where per-run boot cost hurts most (P4). No repository found.
+  - speed claim: none
+  - read: abstract and the sections on mode-transition injection points and search space reduction
+- **Avis / libhinj (Hardware Fault INJector for ArduPilot and PX4)** (rel 3, library, MIT) https://github.com/obicons/libhinj
+  - bottlenecks: C11, C12, C3
+  - Research fault-injection library plus PX4 and ArduPilot forks, paired with the paper Avis (arXiv 2106.14959) which injects sensor failures (GPS and others) at mode boundaries and uses a scheduler to search for failing fault combinations in simulation. The injection API and the search-over-fault-timing idea are the lift; the 2021 forks are out of date against current PX4.
+  - speed claim: none
+  - read: libhinj repo (library headers and README), https://github.com/obicons/PX4Libhinj (PX4 integration diff), https://arxiv.org/abs/2106.14959 (scheduler and fault model sections)
+- **BabbleSim (2G4 phy, device_pause_simu, device_time_monitor, libRandv2)** (rel 3, simulator, Unconfirmed: no LICENSE file at repo root of base (404); check per-file headers before copying. Treat as idea-only until read.) https://github.com/BabbleSim/base
+  - bottlenecks: P1, P2, P6, C1, C14
+  - Many real-firmware 'devices' (Zephyr native builds) run in separate processes against a central phy that is the time master: it advances only when every device has reported its next event, then jumps to the minimum, a conservative lockstep without polling. Includes a pause device, a time monitor device, and libRandv2, a shared deterministic random library for reproducible noise across devices (C1). Port-per-device naming with a simulation id shows a cleaner answer to P6 than a fixed port table.
+  - speed claim: none
+  - read: https://github.com/BabbleSim/ext_2G4_phy_v1 src/p2G4_main.c, p2G4_com.c, p2G4_func_queue.c, base: libPhyComv1, libRandv2, device_pause_simu, device_time_monitor
+- **Bitcraze crazyflie-firmware motors.c (battery compensation)** (rel 3, source-file, gh returned no SPDX; Bitcraze firmware is GPL-3.0 from memory, not verified. Treat as GPL: reimplement the idea only.) https://github.com/bitcraze/crazyflie-firmware
+  - bottlenecks: C6
+  - A flash-sized battery model in real firmware: a cubic fit mapping motor voltage to thrust, inverted in closed form with cbrtf, and the result divided by supply voltage to get the PWM ratio. This is the forward model SIH could use for throttle to thrust under sag, and the inverse of what PX4 would need for battery compensation. Four coefficients.
+  - speed claim: none
+  - read: src/drivers/src/motors.c: motorsCompensateBatteryVoltage (line about 180), VMOTOR2THRUST0..3 constants
+- **Boost.Atomic wait/notify backends** (rel 3, library, Boost Software License 1.0 (adaptable with attribution)) https://github.com/boostorg/atomic/tree/8903e3ab03ab2f08c287608f204770f70cd1d6e9/include/boost/atomic/detail
+  - bottlenecks: P1
+  - Separate backend headers per OS: futex, Darwin ulock, FreeBSD/DragonFly umtx, Windows WaitOnAddress, and an emulated fallback. Good model for a small wait layer that works on Linux and macOS SITL with a fallback for NuttX-class targets.
+  - speed claim: none
+  - read: include/boost/atomic/detail/wait_ops_futex.hpp, wait_ops_darwin_ulock.hpp, wait_ops_windows.hpp, wait_ops_emulated.hpp, wait_capabilities.hpp and wait_caps_futex.hpp
+- **Brax** (rel 3, physics-engine, Apache-2.0) https://github.com/google/brax
+  - bottlenecks: P6, C12, C1
+  - Whole simulator and policy as pure functions of state plus an explicit PRNG key, so every parallel world has its own reproducible random stream. Pattern for C1 (per-instance seeded streams) and for sweeping parameters across many worlds.
+  - speed claim: Paper (arXiv 2106.13281) claims millions of simulation steps per second per accelerator on Ant and 100-1000x better RL training speed/cost; hardware and per-env table not read by me.
+  - read: https://arxiv.org/abs/2106.13281, brax/envs/base.py (State, step, reset with rng), brax/generalized/pipeline.py (step loop)
+- **Brendan Gregg: Linux Wakeup and Off-Wake Profiling (2016-02-01)** (rel 3, write-up, web article) https://www.brendangregg.com/blog/2016-02-01/linux-wakeup-offwake-profiling.html
+  - bottlenecks: P5, P1
+  - Explains how to read off-wake flame graphs: the bottom frames show why a thread blocked, the next frames show what woke it, and the waker task is at the top. It names the technique to apply to the lockstep path and gives the folded-stack (-f) workflow. Opened HTTP 200; the content summary came from search.
+  - speed claim: none
+  - read: whole post
+- **CARLA + scenario_runner (atomic behaviours, trigger conditions, apply_batch_sync)** (rel 3, tool, MIT) https://github.com/carla-simulator/scenario_runner
+  - bottlenecks: C11, C4, C5, C12, C14
+  - scenario_runner models a scenario as a behaviour tree of atomic actions and atomic trigger conditions evaluated every tick, with a ScenarioManager loop and a weather_sim module that interpolates weather over time (C5 analogue). CARLA's World/WeatherParameters/rpc Command (batched commands applied in one tick) are models for 'apply N changes atomically at a step'. MIT.
+  - speed claim: none
+  - read: srunner/scenariomanager/scenario_manager.py, srunner/scenariomanager/scenarioatomics/atomic_behaviors.py, srunner/scenariomanager/scenarioatomics/atomic_trigger_conditions.py, srunner/scenariomanager/weather_sim.py, carla-simulator/carla: LibCarla/source/carla/rpc/Command.h and WeatherParameters.h, 
+- **CARLA synchronous mode, fixed_delta_seconds and physics substepping** (rel 3, simulator, MIT) https://github.com/carla-simulator/carla
+  - bottlenecks: P1, P3, P7, C14
+  - Defines the vocabulary for time modes: server waits for one client tick; async mode plus a fixed step gives maximum speed with consistent timestamps; substepping splits one sim step into physics sub-steps with the rule fixed_delta_seconds <= max_substep_delta_time * max_substeps. The substep idea fits P7 (integrator accuracy vs step size) without changing the control rate. The ROS bridge by default waits for every expected sensor message before ticking, which is an explicit 'all components finished' rule.
+  - speed claim: claim in docs (https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/, opened): defaults of up to 10 substeps with max delta 0.01 s; physics 'can misbehave' when the step exceeds 0.1 s. No speed benchmark found.
+  - read: https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/, LibCarla/source/carla/rpc/EpisodeSettings.h, Unreal/CarlaUE4/Plugins/Carla/Source/Carla/Game/CarlaEpisode.cpp and CarlaEngine.cpp (tick handling), carla-simulator/ros-bridge: carla_ros_bridge synchronous mode code (https://github.com/ca
+- **CORE-MATH (correctly rounded libm functions)** (rel 3, library, MIT per project page (not verified by me; check file headers)) https://gitlab.inria.fr/core-math/core-math
+  - bottlenecks: C13, P7
+  - Correctly rounded float and double sin, cos, cbrt, atan, atan2, expf, powf with identical result on every platform, so SIH trace hashes would not depend on glibc version. Cost against glibc not measured by me; the project claims comparable speed.
+  - speed claim: none
+  - read: src/binary64/cbrt, atan2, sin, cos, src/binary32 for float variants
+- **Cheeseman and Bennett (1955) and Hayden (1976) ground-effect formulas** (rel 3, paper, Papers) https://icas.org/ICAS_ARCHIVE/ICAS2008/PAPERS/085.PDF
+  - bottlenecks: C6
+  - The search surfaced the Khromov and Rand ICAS 2008 paper, which gives a Cheeseman-Bennett-based thrust-ratio expression and says it is meant for real-time simulation. The 1955 and 1976 originals were not opened; they remain leads. The Cheeseman-Bennett form itself is confirmed through AirSim-GE's code comment, T_IGE/T_OGE = 1/(1-(R/4Z)^2). Hayden's empirical fit was not found.
+  - speed claim: none
+  - read: ICAS2008 paper 085: the thrust-ratio expression and its real-time implementation notes
+- **Contiki-NG native platform** (rel 3, runner-or-infrastructure, BSD-3-Clause (not confirmed from a header)) https://github.com/contiki-ng/contiki-ng/blob/develop/arch/platform/native/platform.c
+  - bottlenecks: P5, P2, P3
+  - Opened the source. A single-threaded run-to-completion event loop (protothreads) that blocks only in select(), with the timeout computed from etimer_next_expiration_time() so it never sleeps past the next timer, and with file descriptors registered through select_set_callback. This is the textbook wait strategy for a time master: block on one syscall with a deadline equal to the next scheduled event, so nothing else polls. Real-time clock, no virtual time.
+  - speed claim: none
+  - read: arch/platform/native/platform.c: set_select_timeout, select_set_callback, the main loop, arch/platform/native/clock.c
+- **Copper (copper-rs)** (rel 3, runner-or-infrastructure, Apache-2.0) https://github.com/copper-project/copper-rs
+  - bottlenecks: C11, C12, C13, P3
+  - Deterministic robotics runtime with unified logging and replay, a RobotClock::mock() whose time is set by a control handle, and a simulation module. Pattern for golden traces, replay from a log, and an injectable clock.
+  - speed claim: none
+  - read: core/cu29_clock/src/lib.rs (RobotClock::mock, mock_state, increment), core/cu29_runtime/src/simulation.rs, core/cu29_runtime/src/copperlist.rs, curuntime.rs, core/cu29_unifiedlog/src/lib.rs
+- **DPDK EAL pause/monitor intrinsics and power PMD management** (rel 3, library, BSD-3-Clause (adaptable with attribution)) https://github.com/DPDK/dpdk/blob/a13c1053360ee26bbacca9f883d3f3cb83a0f366/lib/eal/x86/rte_power_intrinsics.c
+  - bottlenecks: P1, P2
+  - One abstraction (rte_power_monitor) over Intel UMONITOR/UMWAIT, AMD MONITORX and a fallback; rte_power_pmd_mgmt calibrates 'how many pauses fit in a microsecond' at start-up and escalates by empty-poll count. Shows how to expose an optional accelerated wait behind a capability check without breaking boards that lack it.
+  - speed claim: none
+  - read: lib/eal/x86/rte_power_intrinsics.c: intel_umonitor, intel_umwait, amd_monitorx, rte_power_monitor, monitor_supported, lib/power/rte_power_pmd_mgmt.c: pause_per_us calibration (around line 187-195), empty-poll scaling, lib/eal/include/generic/rte_pause.h, rte_spinlock.h
+- **DTIC ADA495531 (JPL): recursive algorithms for generating flicker and other power-law noise, Allan-variance validation** (rel 3, paper, US government report (likely public domain; verify)) https://apps.dtic.mil/sti/pdfs/ADA495531.pdf
+  - bottlenecks: C2
+  - From the search snippet: describes two 1971 recursive methods for 1/f-type noise (sum of low-pass-filtered white noises, cascade of lead-lag filters) and warns about initialising filter state. That would give bias-instability (flicker) generation with a few filter states, cheap enough for the hot path. My HEAD request returned 403, and I did not open the paper.
+  - speed claim: none
+  - read: whole paper
+- **DiffAero** (rel 3, simulator, BSD-3-Clause) https://github.com/flyingbitac/diffaero
+  - bottlenecks: P7, C14
+  - GPU differentiable quadrotor sim with four dynamics fidelity levels (full quadrotor with body-rate controller, simplified, continuous and discrete point mass with control latency factor lambda and drag d) and per-episode randomization of drag, latency and action range, calibrated against hardware and deployed to PX4. Useful as a fidelity ladder and for how latency is modelled as a first-order acceleration tracker (C14). Not embeddable.
+  - speed claim: measured per paper (arXiv 2509.10247 HTML, Table I, Sec. IV-A): physics 3.4x10^6 FPS at 8,192 parallel environments, depth rendering 9.6x10^4 FPS at 2,048 envs 64x64, Intel Core i9-14900K and RTX 4090. Same table: Aerial Gym 1.9x10^6, OmniDrones 8.4x10^5, VisFly 9x10^4, Flightmare 2.2x10^5.
+  - read: paper Sec. III-A Eq. 1-4, repository dynamics module (file names not listed in paper; inspect diffaero/dynamics/)
+- **Drake Simulator (event-driven AdvanceTo, publish/discrete/unrestricted events, integrators)** (rel 3, physics-engine, BSD-3-Clause (known, LICENSE not opened this session)) https://github.com/RobotLocomotion/drake/blob/master/systems/analysis/simulator.cc
+  - bottlenecks: P7, C10, C11, C14
+  - Simulator::AdvanceTo splits at scheduled events so a change lands at an exact simulated time, which is the answer to C10 (parameter changes arriving up to 1 s late) and C11. Also error-controlled RK3 and implicit Euler integrators for P7 and a target-realtime-rate setting that does the pacing. Fits the physics side more than the time side.
+  - speed claim: none
+  - read: systems/analysis/simulator.cc AdvanceTo and event handling, systems/analysis/runge_kutta3_integrator.cc, systems/analysis/simulator_config.cc
+- **Drepper, Futexes Are Tricky** (rel 3, paper, paper (all rights reserved)) https://www.ic.unicamp.br/~islene/2s2013-mo806/futex/futex-are-tricky.pdf
+  - bottlenecks: P1, P5
+  - Correctness guide to building mutex, condvar and one-shot event on futex words (state values, who may skip the wake syscall). Needed before any hand-written futex barrier for lockstep to avoid lost wakeups. Found via search; I confirmed the URL returns 200 but did not read it.
+  - speed claim: none
+  - read: Sections on mutex variants 1-3 and condition variable
+- **Dryden wind turbulence reference (goromal/wind-dynamics, as used by RotorPy)** (rel 3, library, none (license field null); reimplement from the public spec) https://github.com/goromal/wind-dynamics
+  - bottlenecks: C4
+  - Dryden turbulence implementation that RotorPy wraps for stochastic wind. The repo has no license, so use it only as a cross-check; Dryden is a published MIL-spec shaping-filter model (MIL-F-8785C / MIL-HDBK-1797) that can be reimplemented cheaply as a few first-order filters driven by a seeded noise stream, which fits flash and gives gust, turbulence and shear for C4.
+  - speed claim: none
+  - read: rotorpy/wind/dryden_winds.py and dryden_utils.py (how it is wrapped), the repository's source files (not opened)
+- **ESP-IDF FreeRTOS Linux port (components/freertos/FreeRTOS-Kernel/portable/linux), cooperative syscalls layer** (rel 3, runner-or-infrastructure, Apache-2.0 (confirmed from the SPDX header of freertos_linux_coop_syscalls.h)) https://github.com/espressif/esp-idf/tree/master/components/freertos/FreeRTOS-Kernel/portable/linux
+  - bottlenecks: P5, P1
+  - Opened the header and file list. A fork of the FreeRTOS POSIX port with a 'cooperative syscall' layer (utils/linux_port_coop_syscalls.c): stdio and sockets are made non-blocking and freertos_linux_coop_read, write, poll and similar calls retry on EAGAIN while yielding to other FreeRTOS tasks. Blocking I/O therefore never stalls the one-runs-at-a-time baton. It also carries wait_for_event.c and an SMP variant. I did not read the .c file body. This applies if SIH's driver thread must do I/O (MAVLink sockets) without parking the whole lockstep.
+  - speed claim: none
+  - read: portable/linux/utils/linux_port_coop_syscalls.c, portable/linux/utils/linux_port_coop_internal.h (LINUX_COOP_IO_LOOP), portable/linux/include/esp_private/freertos_linux_coop_syscalls.h, portable/linux/port.c line ~342 freertos_linux_coop_syscalls_init
+- **Eclipse Trace Compass: OS execution graph and critical path (LTTng kernel traces)** (rel 3, tool, EPL-2.0 (from memory, not checked; EPL is not a copy-in license for BSD code)) https://github.com/eclipse-tracecompass/org.eclipse.tracecompass
+  - bottlenecks: P5
+  - Builds an execution graph from kernel traces in which wakeup events create edges between threads, then computes the critical path for a chosen thread. The same idea as Perfetto's but with a published algorithm and a Java GUI. Lift the algorithm, not the tool.
+  - speed claim: none
+  - read: analysis/org.eclipse.tracecompass.analysis.graph.core/src/org/eclipse/tracecompass/internal/analysis/graph/core/criticalpath/OSCriticalPathAlgorithm.java, analysis/org.eclipse.tracecompass.analysis.os.linux.core/.../execution/graph/OsExecutionGraphProvider.java, lttng/org.eclipse.tracecompass.lttng2
+- **Efficient Parallel Reinforcement Learning Framework using the Reactor Model** (rel 3, paper, ) https://arxiv.org/abs/2312.04704
+  - bottlenecks: P5, P6
+  - Argues a fixed communication pattern lets the scheduler drop lock acquire/release and coordination messages. It applies this to simulation environments (Gym, Atari) stepped in parallel with a policy. Closest match to the 'fixed pattern, no handshake' idea for stepping a simulator and a controller.
+  - speed claim: Claim from abstract: 1.21x and 11.62x higher simulation throughput than Ray in OpenAI Gym and Atari on a single-node multi-core platform, and 31.2% shorter training time (setup not seen, abstract only)
+  - read: Abstract and the section on simulation throughput comparison with Ray
+- **FMI 3.0 standard (state get/set, clocks, variability) and FMPy** (rel 3, paper, FMI headers/spec: licence not verified (GitHub NOASSERTION); FMPy BSD-2-Clause) https://github.com/modelica/fmi-standard
+  - bottlenecks: P4, C10, C12, C13, C14
+  - Standardised vocabulary for exactly this problem. fmi3GetFMUState/SetFMUState/SerializeFMUState (opened header) give snapshot, rollback and serialise. Variable variability (constant, fixed, tunable, discrete, continuous) and causality (parameter, input, output) classify every variable by when it may change, which suits a SIH variable catalogue. fmi3SetClock/EnterEventMode/UpdateDiscreteStates handle events at an exact time. FMPy (BSD-2) shows input signals set at times and start values.
+  - speed claim: none
+  - read: headers/fmi3FunctionTypes.h (fmi3GetFMUState, fmi3SetFMUState, fmi3SetClock, fmi3UpdateDiscreteStates), schema/ (modelDescription variability and causality), CATIA-Systems/FMPy: src/fmpy/simulation.py, src/fmpy/fmi3.py, modelica/ssp-standard (parameter sets)
+- **FUTEX_SWAP / SwitchTo (Oskolkov RFC) and UMCG** (rel 3, write-up, GPL-2.0 (idea only)) https://lwn.net/Articles/824409/
+  - bottlenecks: P5, P1
+  - Direct thread handoff: wake the next thread and sleep in a single futex operation. This is the run-to-completion idea applied to threads. In a lockstep tick the master hands the CPU to waiter A, A hands to B, and so on, so no idle-CPU IPI is needed. LWN describes it as an RFC. I did not confirm that it was merged, and I believe it was not. UMCG (LWN 879398) is the later user-managed scheduling attempt: three syscalls umcg_ctl, umcg_wait, umcg_kick. I have not confirmed it is upstream either. The idea is useful for design, but neither is available on a stock kernel, so it can only be a note.
+  - speed claim: Claim only, from the patch description via LWN, no hardware given: wake-then-wait 'can be reduced to one futex operation that runs 5-10 times faster'.
+  - read: LWN 'futex/sched: introduce FUTEX_SWAP operation', LWN 879398 'User-managed concurrency groups'
+- **FUTEX_SWAP patch series (Oskolkov, Google)** (rel 3, paper, GPL-2.0 (kernel patch): idea only) https://lore.kernel.org/20200722234538.166697-2-posk@posk.io/
+  - bottlenecks: P1
+  - A single syscall that wakes the other thread and sleeps the caller, cutting a wake+wait handoff to one operation. It is exactly the SIH to flight-stack ping-pong shape. A search summary said it was not confirmed as merged, and I believe it never reached mainline, so treat it as an idea and a benchmark design (patch 3 selftest) only.
+  - speed claim: Claim from the cover letter as summarised in a search result (I did not open the letter): 'runs 5-10 times faster' than FUTEX_WAKE plus FUTEX_WAIT. Hardware not known.
+  - read: patch 1/3 and cover letter, patch 3/3 selftest futex_swap benchmark
+- **Factorio heavy mode and desync reports (FFF-63, wiki)** (rel 3, write-up, Closed source. Ideas only. I did not find a per-tick checksum description on the pages I read (fff-302, fff-76 mention desync only briefly); that part remains a lead.) https://www.factorio.com/blog/post/fff-63
+  - bottlenecks: C13, P4
+  - Heavy mode saves and loads the whole game every tick to expose hidden state that was not saved. The blog states the finding that most desyncs come from hidden or uninitialised state. For SIH this is the way to prove a snapshot or reset restores everything (P4). The wiki also describes desync report files that are compared with a text diff.
+  - speed claim: none
+  - read: https://www.factorio.com/blog/post/fff-63 (heavy mode section), https://wiki.factorio.com/Desynchronization (sections 2.2.4 'Using heavy mode command' and the desync report)
+- **Faessler, Franchi, Scaramuzza: Differential flatness of quadrotor dynamics subject to rotor drag (arXiv 1712.02402)** (rel 3, paper, Paper) https://arxiv.org/abs/1712.02402
+  - bottlenecks: C6, C7
+  - Gives the linear rotor-drag model (drag linear in body velocity, via a drag matrix D) that RotorPy and RotorS follow. It is the cheapest rotor-drag form for SIH: a 3x3 diagonal matrix applied to body-frame airspeed. The search also pointed to RotorS as having the same linear rotor drag (from a quote in the Data-Driven MPC paper arXiv 2102.05773, which I did not open).
+  - speed claim: none
+  - read: https://ar5iv.labs.arxiv.org/html/1712.02402, the rotor-drag model section
+- **Fast DDS data-sharing delivery (shared-memory history, notification)** (rel 3, library, Apache-2.0 (adaptable with attribution)) https://github.com/eProsima/Fast-DDS
+  - bottlenecks: P5
+  - The writer's history lives in a pre-allocated shared-memory pool (max_samples + extra_samples). Readers poll the pool and a separate notification object wakes them. This is a worked example of 'reader reads the writer's ring in place, notification separated from data', which is the shape of uORB queue topics. Plain types only.
+  - speed claim: Claim (not opened as numbers): the v2.2.0 announcement says most latency overhead is buffer-to-buffer copies; its charts are images. https://discourse.openrobotics.org/t/fast-dds-v2-2-0-latency-performance/18989
+  - read: src/cpp/rtps/DataSharing/DataSharingPayloadPool.cpp, src/cpp/rtps/DataSharing/DataSharingNotification.cpp, src/cpp/rtps/DataSharing/DataSharingListener.cpp, src/cpp/rtps/DataSharing/WriterPool.hpp and ReaderPool.hpp
+- **Firecracker snapshotting docs and implementation** (rel 3, library, Apache-2.0 (adapt with attribution)) https://github.com/firecracker-microvm/firecracker/tree/main/docs/snapshotting
+  - bottlenecks: P4, P6, C1
+  - Best written treatment of what goes wrong when many runs are restored from one snapshot: random-for-clones.md covers stale RNG state after clone (SIH equivalent: C1, srand/rand state and seed after restore); handling-page-faults covers kernel vs userfaultfd lazy memory load; network-for-clones covers sockets; snapshot format has versioning and CRC.
+  - speed claim: Unverified: a search summary said the docs give a resume latency target of under 8 ms (Intel, 2 vCPU, 512 MB); I could not find that line in the raw snapshot-support.md, so treat as unconfirmed.
+  - read: docs/snapshotting/random-for-clones.md, docs/snapshotting/handling-page-faults-on-snapshot-resume.md, docs/snapshotting/network-for-clones.md, docs/snapshotting/snapshot-support.md, docs/snapshotting/versioning.md, src/vmm/src/snapshot/mod.rs and persist.rs
+- **FitM (Fuzzer in the Middle)** (rel 3, tool, MIT) https://github.com/fgsect/FitM
+  - bottlenecks: P4
+  - A real example of using CRIU (plus qemuafl) for userspace snapshots in a fast loop, with generations of snapshots chosen by a scheduler. Shows the practical file layout and the cost of dump/restore through CRIU for ordinary processes, which is the evidence needed before betting on CRIU for px4.
+  - speed claim: none
+  - read: README.md, src/ create_next_snapshot() and the criu invocation code (not opened)
+- **Fix Your Timestep (Gaffer on Games)** (rel 3, write-up, article) https://gafferongames.com/post/fix_your_timestep/
+  - bottlenecks: P2, C14
+  - Accumulator pattern with frame-time cap to avoid the spiral of death, plus remainder handling; reference for jitter, variable-step and catch-up logic in the pacing loop.
+  - speed claim: none
+  - read: Whole article; sections 'Free the physics' and 'The final touch'
+- **FlightGear SimGear property tree, conditions, bindings and commands** (rel 3, library, not verified (copyleft assumed)) https://github.com/FlightGear/simgear
+  - bottlenecks: C10, C11
+  - Every variable lives in a hierarchical property tree (SGPropertyNode) with typed values, listeners and tied properties (bind a C++ variable to a path), plus declarative conditions (SGCondition) and bindings that trigger commands. Same ideas as JSBSim's tree, and the model for 'every SIH variable has a name; conditions read names; actions write names'. Also has an embedded Nasal scripting engine. Licence not verified (GitHub NOASSERTION); treat as copyleft, idea only.
+  - speed claim: none
+  - read: simgear/props/props.hxx/.cxx, simgear/props/condition.cxx, simgear/props/tiedpropertylist.hxx, simgear/props/propertyObject.hxx, simgear/structure/SGBinding.cxx, commands.cxx
+- **FlightGear YASim FDM** (rel 3, source-file, GPL-2.0 (idea only)) https://github.com/FlightGear/flightgear/tree/HEAD/src/FDM/YASim
+  - bottlenecks: P7, C6, C7, C8, C9
+  - Geometry-driven FDM: generic surfaces, wings, propellers and rotors assembled into a rigid body, with a multi-sub-step integrator (dt/4 and an RK-style variant) and rotation applied by rotation matrix from angular rate. Useful for a generic N-rotor body and for comparing integrator accuracy against step size. Turbulence.cpp is a separate small file.
+  - speed claim: none
+  - read: src/FDM/YASim/Integrator.cpp: calcNewInterval (two variants), rotMatrix, extrapolatePosition, src/FDM/YASim/RigidBody.cpp, src/FDM/YASim/Model.cpp, src/FDM/YASim/Turbulence.cpp, src/FDM/YASim/Propeller.cpp
+- **FlightGoggles multicopterDynamicsSim (inertialMeasurementSim)** (rel 3, library, MIT) https://github.com/mit-aera/multicopterDynamicsSim
+  - bottlenecks: C2, C1, C7
+  - Small standalone multicopter dynamics plus IMU class with white noise variance, bias as a random-walk (process-noise autocorrelation) and an explicit setRandomSeed(imuSeed) separate from other randomness; dynamics side includes per-motor parameters. Compact enough to read in a sitting and shows the minimum viable seeded bias walk.
+  - speed claim: none
+  - read: inertialMeasurementSim.cpp (constructor lines 18-30, setRandomSeed ~35, setBias ~47 and ~75, update), inertialMeasurementSim.hpp, multicopterDynamicsSim.cpp
+- **Flightmare (physics half)** (rel 3, simulator, MIT (LICENSE file text is MIT; GitHub API reports NOASSERTION)) https://github.com/uzh-rpg/flightmare
+  - bottlenecks: P5, P6, P7, C6
+  - C++ quadrotor dynamics decoupled from Unity rendering; VecEnv runs many quadrotors with an OpenMP 'parallel for schedule(dynamic)' over environments with a configurable thread count; swappable IntegratorBase with Euler and RK4 and a function-pointer dState; quad motor model with min/max omega and tau_inv; Eigen fixed-size vectors. A C++ prior art for batch stepping and integrator abstraction that fits flash-limited code better than the Python sims.
+  - speed claim: claim (abstract, arXiv 2009.00563): physics 'up to 200,000 Hz' and rendering up to 230 Hz on a laptop; benchmark setup not described in the abstract. Aerial Gym and DiffAero papers report it at 2.2x10^5 physics FPS (DiffAero Table I, RTX 4090 and i9-14900K machine).
+  - read: flightlib/src/envs/vec_env.cpp (omp_set_num_threads, #pragma omp parallel for schedule(dynamic) near line 94), flightlib/include/flightlib/common/integrator_base.hpp, integrator_rk4.hpp, integrator_euler.hpp, flightlib/src/dynamics/quadrotor_dynamics.cpp (dState, motor tau and omega limits), flightl
+- **GNU Parallel** (rel 3, tool, GPL-3.0 (from memory, not checked on the page). Use as a tool, copy no text.) https://www.gnu.org/software/parallel/parallel_tutorial.html
+  - bottlenecks: P6, C11, C12
+  - The tutorial page exists and mentions {%} (job slot number, usable to derive per-slot port/instance ids), --joblog, --resume-failed, --results, --halt now and --timeout. Together these give instance ids, per-run result directories, resume after a crash and a kill on the first failure, which is what a sweep runner needs. It replaces the global pkill in the launch script with per-job timeouts.
+  - speed claim: none
+  - read: parallel_tutorial.html sections on job slots ({%}), --joblog/--resume-failed, --results, --halt, --timeout
+- **GPUSimBench (paper)** (rel 3, paper, ) https://arxiv.org/abs/2607.13059
+  - bottlenecks: C13, C1, P3, P6
+  - Benchmarks GPU simulators for scalability, physical consistency and determinism; abstract says GPU-batched execution gives run-to-run and inter-environment variability even with identical initial conditions, and that 'unbounded scaling can compromise reproducibility without explicit constraints'. Defines throughput as environments times timed steps divided by elapsed time. Method to copy for SIH's own speed and determinism measurement.
+  - speed claim: none
+  - read: Abstract (opened), Methodology section on throughput and determinism regimes (not read)
+- **Gazebo (gz-sim) SimulationRunner** (rel 3, simulator, Apache-2.0) https://github.com/gazebosim/gz-sim/blob/main/src/SimulationRunner.cc
+  - bottlenecks: P2, P3, P5, C10, C11
+  - Step loop with stepSize and desiredRtf: the real-time pacing sleep is computed as stepSize/desiredRtf, realTimeFactor is measured each step, step size can be changed at run time (code near line 508 re-derives the sleep when stepSize changes), pause/step/run N iterations through Server::Run. Parallel PostUpdate systems. A model for P3 (rtf 0 = unthrottled) and for live change at a step boundary (C10).
+  - speed claim: none
+  - read: src/SimulationRunner.cc lines ~170-230 (stepSize, desiredRtf), ~400-470 (Run, pause, simTime += stepSize, RTF calc), ~500-530 (step size change), src/Server.cc (Run with iterations)
+- **GeographicLib** (rel 3, library, MIT (can adapt with attribution)) https://github.com/geographiclib/geographiclib
+  - bottlenecks: P7
+  - Geocentric::Reverse implements Vermeille's direct ECEF to geodetic method extended near the centre, with accuracy near round-off per the author. A vetted reference for a closed-form conversion.
+  - speed claim: none
+  - read: src/Geocentric.cpp: Geocentric::IntReverse, include/GeographicLib/Geocentric.hpp
+- **Go testing/synctest (fake clock bubble, time advances only when all goroutines durably blocked)** (rel 3, library, BSD-3-Clause) https://github.com/golang/go/tree/master/src/testing/synctest
+  - bottlenecks: P1, P3, P5, P8
+  - Gives the exact rule for a time master to know everyone is done: the fake clock moves only when every goroutine in the bubble is durably blocked, and synctest.Wait() returns when all are idle. For SIH the analogue is 'advance sim time when the flight stack's work queues and waiters are all idle', replacing the usleep(100) poll in P1 and the blind pacing in P2. The runtime side defines what counts as durably blocked (a useful list of what must NOT count, such as blocking on external I/O).
+  - speed claim: none
+  - read: src/testing/synctest/synctest.go (package doc: 'durably blocked'), src/internal/synctest/synctest.go, src/runtime/synctest.go
+- **Gymnasium utils/seeding.py** (rel 3, source-file, MIT) https://github.com/Farama-Foundation/Gymnasium
+  - bottlenecks: C1, C12
+  - Standard RL seeding contract: reset(seed) builds np.random.Generator(PCG64(SeedSequence(seed))) and returns the actual entropy used, so every episode can be replayed and logged. Template for SIH run metadata (seed in, seed out).
+  - speed claim: none
+  - read: gymnasium/utils/seeding.py np_random() at c08564bb8edd741ff20430d3b500b2e76966772d
+- **GzDRL: single-process deterministic stepping for Gazebo (arXiv 2609.13243)** (rel 3, paper, Paper; repository link not checked) https://arxiv.org/abs/2609.13243
+  - bottlenecks: P3, P5, P6, C1
+  - Describes replacing middleware-based stepping with a single-process, direct synchronisation of agent actions and physics updates to get deterministic, high-throughput, vectorised runs. Same architecture goal as SIH's in-process lockstep. I read only the abstract, so the mechanism and any benchmark numbers are unread.
+  - speed claim: none
+  - read: arXiv 2609.13243 sections on environment stepping and benchmarks (not read)
+- **HELICS co-simulation time management** (rel 3, library, BSD-3-Clause; adaptable with attribution) https://github.com/GMLC-TDC/HELICS
+  - bottlenecks: P1, P5, C14
+  - Federate time-granting algorithm with per-federate period, offset, input/output delays and lookahead (minTimeDelta), plus time-iteration requests and dependency tracking so a federate is granted time as soon as only its dependencies are done, not everyone. A worked answer to 'time master knows who finished', including iterative re-execution at the same time step.
+  - speed claim: none
+  - read: src/helics/core/TimeCoordinator.cpp (iterate request handling ~lines 150-240), src/helics/core/BaseTimeCoordinator.cpp, src/helics/core/TimeDependencies.cpp
+- **Hermit (deterministic Linux sandbox from Meta)** (rel 3, tool, not determined (GitHub API NOASSERTION; a LICENSE file is present)) https://github.com/facebookexperimental/hermit
+  - bottlenecks: C1, C13, P5
+  - Detcore makes multi-threaded programs deterministic by serialising scheduling with a seeded scheduler, virtual time and replayed syscalls. Applies to the stated problem that draw order of the shared rand() depends on thread scheduling (C1), and as a tool to check whether PX4 SITL runs repeat bit for bit (C13). Not for embedding.
+  - speed claim: none
+  - read: detcore/src/scheduler.rs and detcore/src/scheduler/*, detcore/src/config.rs, detcore/src/resources.rs
+- **Hydra (multirun, sweepers, launchers)** (rel 3, library, MIT) https://github.com/hydra-ecosystem/hydra
+  - bottlenecks: P6, C12
+  - Config composition with command-line overrides, --multirun cartesian sweeps, and one output folder per job that stores the resolved config, so any run can be rerun from its folder. Launcher plugins (joblib, submitit, ray) and sweeper plugins (optuna, ax) are the pattern for a SIH batch front end. The 'job folder holds its own config' convention is the cheapest replay mechanism found.
+  - speed claim: none
+  - read: hydra/_internal/core_plugins/basic_sweeper.py, plugins/hydra_joblib_launcher/.../_core.py, plugins/hydra_optuna_sweeper/.../_impl.py, plugins/hydra_ax_sweeper/.../_earlystopper.py
+- **Hyper-V hypervisor scheduler types (root scheduler on client Windows)** (rel 3, write-up, Microsoft docs) https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/manage/manage-hyper-v-scheduler-types
+  - bottlenecks: P1, P5, P6
+  - Doc says the root scheduler is the default and only supported mode on Windows client, where the NT scheduler in the root partition schedules guest vCPUs. So each WSL2 vCPU is effectively a host thread; waking an idle vCPU is a host scheduler wake. This explains why kernel time is 3 to 4 times user time and why fewer distinct woken vCPUs and processors= limits matter. My reading of the doc; no latency figure given.
+  - speed claim: none
+  - read: The root scheduler; Root scheduler use on client systems
+- **Hypothesis conjecture engine and shrinker** (rel 3, tool, MPL-2.0 (file-level copyleft; reimplement the idea in C++)) https://github.com/HypothesisWorks/hypothesis
+  - bottlenecks: C12, C11
+  - Failing run = byte stream of choices; the shrinker minimises it to the smallest scenario that still fails, and a seed database replays previous failures. Idea for SIH sweeps: when a random condition set crashes a flight, auto-reduce it to the few variables that matter.
+  - speed claim: none
+  - read: hypothesis-python/src/hypothesis/internal/conjecture/shrinker.py, hypothesis-python/src/hypothesis/internal/conjecture/engine.py
+- **JSBSim external force/moment (FGExternalForce)** (rel 3, source-file, LGPL-2.1 (idea only)) https://github.com/JSBSim-Team/jsbsim/blob/911b2d48ce934da183556983ec60b2069faa46fb/src/models/FGExternalForce.cpp
+  - bottlenecks: C8
+  - External force and moment defined in BODY, LOCAL or WIND frame, at a location, with magnitude from a function of properties. Direct pattern for a C8 disturbance input: a frame tag plus a vector that a scenario event can set.
+  - speed claim: none
+  - read: src/models/FGExternalForce.cpp header comment (XML grammar ~l.30-60) and the Calculate/GetBodyForces methods, src/models/FGExternalReactions.cpp
+- **Li, Song, Song, Zhang: Dynamic modeling, simulation and parameter study of electric quadrotor system of Quad-Plane UAV in wind disturbance (IJMAV vol 13, 2021)** (rel 3, paper, Paper; the ideas can be reimplemented.) https://journals.sagepub.com/doi/reader/10.1177/17568293211022211
+  - bottlenecks: C6, C4, C3
+  - The paper the seed described. Per the search summary: a surrogate rotor model for oblique inflow, a BLDC motor model including winding inductance, an ESC model with power losses, and a LiPo model with rate-capacity effect, plus a sensitivity study and wind disturbance. I could not open the full text (only a search summary), so the equations are unread. It is the best published template for the rotor, motor, ESC and battery chain, and its sensitivity study is relevant to C12.
+  - speed claim: none
+  - read: Sections on the rotor surrogate model, BLDC model, ESC loss model and LiPo discharge model, DOI 10.1177/17568293211022211
+- **Lingua Franca / reactors: High-Performance Deterministic Concurrency using Lingua Franca (arXiv 2301.02444) and PretVM (arXiv 2406.06253)** (rel 3, paper, BSD-2-Clause for lingua-franca per my memory; not checked) https://arxiv.org/abs/2301.02444
+  - bottlenecks: P1, P5, P2, C1, C13, C14
+  - Deterministic concurrency through logical time tags: components fire in tag order, in parallel only within one tag, and physical time is only a lower bound, so a fast mode is just not waiting. PretVM compiles quasi-static schedules to cut run-time scheduling. Together they are the formal model for replacing ad hoc wakeups with a schedule and for the answer to what a time master should wait on (the set of reactions at the current tag). Whether LF fast mode has published numbers was not found.
+  - speed claim: Abstract claim (Savina benchmarks): LF outperforms Akka by 1.86x and CAF by 1.42x; hardware not stated on the page. Source: https://arxiv.org/abs/2301.02444. PretVM page gave no performance figures.
+  - read: arXiv 2301.02444 scheduler section, arXiv 2406.06253 PretVM instruction set and schedule generation
+- **Lingua Franca and reactor-c federated RTI (logical time, fast mode, tag advance grants)** (rel 3, runner-or-infrastructure, BSD-2-Clause) https://github.com/lf-lang/reactor-c/tree/main/core/federated/RTI
+  - bottlenecks: P1, P3, P5, P6, C14
+  - A deterministic-by-construction time master. Federates report next event tags; the RTI computes the earliest possible future incoming message tag per node and sends Tag Advance Grants only when safe, with minimum-delay graphs (lookahead) so independent components do not wait on each other. The 'fast' target property runs logical time without wall sleep. Directly answers 'how a time master knows all components finished a step' and gives a principled lookahead for SIH's physics/stack/MAVLink components. I did not verify the fast-mode property names, only the RTI files.
+  - speed claim: none
+  - read: core/federated/RTI/rti_common.c: notify_advance_grant_if_safe, earliest_future_incoming_message_tag, update_min_delays, core/federated/RTI/rti_remote.c, core/federated/federate.c, core/tag.c
+- **Linux cpuidle documentation (guest halt polling) for VM wake-up cost** (rel 3, write-up, kernel docs) https://docs.kernel.org/admin-guide/pm/cpuidle.html
+  - bottlenecks: P5
+  - Lead for the 'what else costs kernel time on a VM' question: waking a thread on an idle vCPU needs a cross-CPU wake-up (IPI) and idle exit, which are more costly in a guest, and 25 wake-ups per tick multiplies that. Options to test on the builder, not run by me: pin the whole px4 process to few CPUs, guest cpuidle haltpoll governor, idle=poll. My web search for measured numbers was refused (budget used), so no figure and no WSL2 evidence; this is a reading lead only.
+  - speed claim: none
+  - read: cpuidle governors section, haltpoll, Documentation/virt/kvm/halt-polling.rst
+- **Linux dirty-page tracking: soft-dirty, PAGEMAP_SCAN, userfaultfd write-protect** (rel 3, write-up, kernel documentation; the syscalls/ioctls are APIs usable by any licence) https://docs.kernel.org/admin-guide/mm/soft-dirty.html
+  - bottlenecks: P4
+  - Gives in-process incremental restore without instrumentation: clear soft-dirty bits (write 4 to /proc/PID/clear_refs), run, read /proc/PID/pagemap bit 55 to list written pages, copy those pages back from a saved image. PAGEMAP_SCAN ioctl is the faster modern read path; userfaultfd write-protect is the other route. Caveat: remapped regions are always marked dirty, and soft-dirty with userfaultfd lazy fill is awkward (2025 CRIU thread).
+  - speed claim: none
+  - read: docs.kernel.org/admin-guide/mm/soft-dirty.html, docs.kernel.org/admin-guide/mm/pagemap.html (Pagemap Scan IOCTL), docs.kernel.org/admin-guide/mm/userfaultfd.html, lists.openwall.net/linux-kernel/2025/05/12/91
+- **Linux futex2 docs and perf bench futex-wake / futex-wake-parallel** (rel 3, tool, GPL-2.0: reimplement, do not copy) https://docs.kernel.org/userspace-api/futex2.html
+  - bottlenecks: P1, P5
+  - futex_waitv waits on several futexes at once, which could replace the lockstep scheduler's broadcast to every waiter when one thread waits on more than one event. perf bench futex wake / wake-parallel measure wake latency across N waiters and are the model for a P5 benchmark of the lockstep set_absolute_time broadcast.
+  - speed claim: None found.
+  - read: docs.kernel.org/userspace-api/futex2.html, tools/perf/bench/futex-wake.c, tools/perf/bench/futex-wake-parallel.c
+- **Linux hrtimer / clock_nanosleep / timerfd (kernel/time/hrtimer.c)** (rel 3, source-file, GPL-2.0) https://github.com/torvalds/linux/blob/master/kernel/time/hrtimer.c
+  - bottlenecks: P2
+  - Where timer_slack_ns is applied (hrtimer_set_expires_range_ns, current->timer_slack_ns, no slack for RT tasks) and where TIMER_ABSTIME sleeps are armed. Read to see the exact late-by bound for usleep versus clock_nanosleep(TIMER_ABSTIME) with slack reduced.
+  - speed claim: none
+  - read: kernel/time/hrtimer.c: hrtimer_nanosleep, hrtimer_sleeper, kernel/sys.c: PR_SET_TIMERSLACK handler
+- **Linux kernel bug 213029: clock_gettime() much slower with Hyper-V clocksource (5.12 regression)** (rel 3, write-up, GPL (reimplement only)) https://bugzilla.kernel.org/show_bug.cgi?id=213029
+  - bottlenecks: P2, P5
+  - Relevant to the kernel-time finding on WSL2: SIH calls gettimeofday and px4 hrt calls clock_gettime constantly. If the guest clocksource cannot be read through the vDSO, each call is a real system call. Cheap to test on the builder: read /sys/devices/system/clocksource/clocksource0/current_clocksource and time a clock_gettime loop. Not confirmed that WSL2 is affected.
+  - speed claim: Search-result summary (unverified, from a 2019 kernel commit message I did not open): TSC page read in userspace costs about 131 cycles against 5664 cycles for the MSR clocksource.
+  - read: bug page for numbers, arch/x86/include/asm/vdso/gettimeofday.h (vdso_read_cycles, fallback to syscall)
+- **Linux kernel/time/timer.c (timer wheel) and hrtimer docs** (rel 3, source-file, GPL-2.0 (reimplement idea only)) https://github.com/torvalds/linux/blob/master/kernel/time/timer.c
+  - bottlenecks: P5, P8
+  - Hierarchical timer wheel with a cached next-expiry so the common tick does no work. Direct pattern for a deadline structure in the lockstep scheduler so that set_absolute_time can exit in O(1) when nothing is due. Documentation/timers/hrtimers.rst explains the red-black-tree alternative for precise timers. I confirmed the files exist but did not read them.
+  - speed claim: none
+  - read: kernel/time/timer.c: next_expiry, collect_expired_timers, kernel/time/hrtimer.c, Documentation/timers/hrtimers.rst
+- **Linux perf bench futex (futex-wake, futex-wake-parallel, futex-hash, futex-requeue)** (rel 3, tool, GPL-2.0 (reimplement idea only)) https://github.com/torvalds/linux/blob/master/tools/perf/bench/futex-wake.c
+  - bottlenecks: P5, P1
+  - Kernel's own futex microbenchmarks. futex-wake wakes N blocked threads one at a time, which is the same shape as the lockstep scheduler waking its waiters each step; futex-wake-parallel adds waker contention on the hash bucket lock.
+  - speed claim: Commit message example (hardware not stated): 'perf bench futex wake -t 512 -r 100' gave 'Wokeup 512 of 512 threads in 5.0109 ms (+-2.25%)', waking 1 at a time. Source: coral.googlesource.com/linux-imx commit 27db7830.
+  - read: tools/perf/bench/futex-wake.c, tools/perf/bench/futex-wake-parallel.c, kernel/futex/waitwake.c, Documentation/userspace-api/futex2.rst
+- **Magnetometer-Simulator (Nitsch)** (rel 3, library, BSD-3-Clause) https://github.com/maximilian-nitsch/Magnetometer-Simulator
+  - bottlenecks: C3
+  - Magnetometer error model with a datasheet config (PNI RM3100): hard-iron offsets, soft-iron, scale, non-orthogonality, noise, driven by odometry and an earth-field model. Useful to replace the fixed noiseGauss3f(0.02,0.02,0.03) in PX4's sensor_mag_sim with a parameterised calibration-error model.
+  - speed claim: none
+  - read: include/mag_simulator_package/mag_simulator.h and mag_simulator_structures.h, src/mag_simulator.cpp, config/pni_rm3100.yaml, test/mag_simulator_test.cpp
+- **MathWorks Dryden/von Karman discrete turbulence blocks (doc)** (rel 3, write-up, documentation, not code) https://www.mathworks.com/help/aeroblks/drydenwindturbulencemodeldiscrete.html
+  - bottlenecks: C4
+  - Documents the MIL-HDBK-1797 discrete-time Dryden forming filters (first-order recursion per axis driven by unit white noise). It is a standard recipe for wind turbulence (C4) at low cost per step. The page appeared in a search result but I did not open it.
+  - speed claim: none
+  - read: Dryden Wind Turbulence Model (Discrete) page, difference equations
+- **MengRao/SPSC_Queue and SPMC_Queue** (rel 3, library, MIT (adaptable)) https://github.com/MengRao/SPSC_Queue
+  - bottlenecks: P1, P5
+  - Minimal single-header SPSC queue where the sender writes directly into queue memory and the reader reads in place (no copy); the SPMC variant is a broadcast queue with a writer and several independent readers, close to uORB multi-subscriber. Tiny, so flash-friendly.
+  - speed claim: claim, README, no hardware stated: 'The latency of communication of a 10-200B message is within 50-100 ns between two cpu cores on the same node' (https://github.com/MengRao/SPSC_Queue)
+  - read: SPSCQueue.h, https://github.com/MengRao/SPMC_Queue (SPMCQueue.h)
+- **Modelica 2019 paper P04 (seed) and nearby FMI master papers** (rel 3, paper, ) https://2019.international.conference.modelica.org/proceedings/html/papers/Modelica2019paperP04.pdf
+  - bottlenecks: P1, C14
+  - The seed PDF downloaded (502 KB) but is compressed binary and no PDF-to-text tool exists on this machine, so I could not read it or get its title. Not used. Crossref confirms related FMI master papers: 10.3384/ecp11063115 (Master for Co-Simulation Using FMI, 2011, 78 cites), 10.3384/ecp12076205 (communication step size control, 2012, 46 cites), 10.3384/ecp15118865 (Test of Basic Co-Simulation Algorithms Using FMI, 2015), 10.3384/ecp19157769 (Robust and accurate master algorithms, Modelica 2019).
+  - speed claim: none
+  - read: Local copy: C:\Users\t\.claude\projects\C--WINDOWS-system32\506ddc65-bca2-4773-9ad1-2c02a742a77f\tool-results\webfetch-1794001837953-rzkdvz.pdf (needs pdftotext), https://doi.org/10.3384/ecp15118865 for a basic-algorithms comparison
+- **MuJoCo determinism statement and Reproducibility notes (warmstart, per-thread mjData)** (rel 3, physics-engine, Apache-2.0) https://mujoco.readthedocs.io/en/stable/programming/simulation.html
+  - bottlenecks: C10, P4, P6, C13
+  - States that simulations are deterministic and that perfect reproducibility needs warmstart state to be restored; one mjData per thread is the model for running many independent instances over one shared model. mj_getState/mj_setState style state specs are a template for SIH snapshot/reset (P4) and parallel runs (P6).
+  - speed claim: none
+  - read: doc page 'Reproducibility' and 'Multi-threading' sections, include/mujoco/mujoco.h: mj_copyData, mj_resetData, mj_getState, mj_setState, python/mujoco/rollout.cc (parallel rollouts, if present)
+- **MuJoCo reproducibility statement** (rel 3, write-up, Apache-2.0) https://mujoco.readthedocs.io/en/stable/computation/index.html#reproducibility
+  - bottlenecks: C13, P4
+  - Short, precise statement of what determinism means for a snapshot-and-reset workflow: saving and reloading state then calling mj_step gives an identical next state only if all integration state is saved, including warmstart accelerations; and exactness is guaranteed only within one version on the same architecture. Gives SIH a model for what its golden-trace promise should and should not claim.
+  - speed claim: none
+  - read: doc/computation/index.rst section 'Reproducibility' (piReproducibility, ~line 2374 at commit 54be5133), doc/programming/simulation.rst line 82 and 418
+- **MuJoCo-Drones-Gym (arXiv 2606.08039)** (rel 3, paper, paper CC BY-SA 4.0 per search listing; code license not checked) https://arxiv.org/abs/2606.08039
+  - bottlenecks: C2, C4, C6, C12, C14
+  - Domain randomization wrappers with a Dryden turbulence plus gust wind field, and a stated list of randomised parameters (mass, thrust and drag coefficients, motor lag, latency, sensor noise, wind magnitude) with ranges for Crazyflie: a ready catalogue of variables for C12. Only the abstract-level summary from search was seen; the arXiv abs page returned HTTP 200.
+  - speed claim: none
+  - read: domain randomization section and parameter range table, wind wrapper section
+- **NASA 42 spacecraft simulator sensor models (42sensors.c)** (rel 3, simulator, unclear (not detected; NASA release)) https://github.com/ericstoneking/42
+  - bottlenecks: C2, C3
+  - Plain C. The gyro and accelerometer use a first-order bias recursion (Bias = CorrCoef*Bias + BiasStabCoef*N) with the error averaged between steps, plus ARW/VRW and quantisation coefficients. The plain-C form is close to what could fit an embedded module. The GitHub licence field is empty (NASA open-source release), so assume ideas only unless the LICENSE file says otherwise.
+  - speed claim: none
+  - read: Source/42sensors.c (AccelerometerModel line ~33, GyroModel line ~108, MagnetometerModel line ~150)
+- **NASA ProgPy propeller_load, dcmotor, esc, powertrain, battery_circuit models** (rel 3, library, gh reports no SPDX. ProgPy is under the NASA Open Source Agreement from memory, not verified; treat as not freely copyable.) https://github.com/nasa/progpy
+  - bottlenecks: C6
+  - A set of small, separate component models: PropellerLoad (torque = c_q*rho*D^5*w^2, default c_q 5.42e-7 'APC data, derived'), DC motor, ESC, powertrain and an equivalent-circuit battery. Together they form a ready-made chain of equations for motor, ESC and battery under load, with an explicit state-update form.
+  - speed claim: none
+  - read: src/progpy/models/propeller_load.py, src/progpy/models/dcmotor.py, src/progpy/models/esc.py, src/progpy/models/powertrain.py, src/progpy/models/battery_circuit.py
+- **NASA cFS: cFE TIME services, Software Bus, OSAL timebase, PSP** (rel 3, library, Apache-2.0 (cFE confirmed with gh; PSP and OSAL not checked)) https://github.com/nasa/cFE
+  - bottlenecks: P2, P5, C14
+  - cFE keeps a time master (MET, STCF, tone and 1 Hz signal) separate from the scheduler. OSAL OS_TimeBase gives a software timebase that can be driven by a callback. Cleanest example of a time source that is injected and not read from the wall clock. Discussion nasa/cFS#778 notes how to feed an external tone and MET, which is the same shape as a sim time master. SB is queue-based, so it is the thread-per-app model SIH wants to avoid; read for the time and tone design only.
+  - speed claim: none
+  - read: nasa/cFE modules/time/fsw/src/cfe_time_tone.c, cfe_time_utils.c, cfe_time_api.c, nasa/osal src/os/posix/src/os-impl-timebase.c, src/os/shared/src/osapi-timebase.c, src/os/inc/osapi-timebase.h, nasa/osal src/ut-stubs/osapi-timebase-stubs.c (how tests drive time), nasa/sch_lab (schedule table, not ope
+- **Nyx / QEMU-Nyx fast snapshot reloads (dirty-page stack)** (rel 3, tool, QEMU-Nyx GitHub reports NOASSERTION (QEMU is GPL-2.0); libnyx GPL-2.0; paper repo RUB-SysSec/Nyx GPL-2.0. Idea-only.) https://github.com/nyx-fuzz/QEMU-Nyx
+  - bottlenecks: P4, C13
+  - Restores a whole VM by resetting only dirtied pages: KVM-PT keeps a stack of dirty page addresses instead of walking a bitmap, QEMU-side writes are tracked in a second map, and device state is reset by memcpy from a logged memory list rather than slow serialization. Gives the cost model: restore cost scales with dirty pages, approaching memory throughput for large resets. For SIH the transferable part is 'restore only what changed', e.g. a dirty-range list over the vehicle state and uORB topics.
+  - speed claim: Paper claim (USENIX Security 2021, sec21-schumilo.pdf, section 4.1.2): reload the system under test 'thousands of times per second'. Measured on Intel Xeon Gold 6230, 40 cores, 192 GB, one fuzzer pinned per physical core. Figure 6 compares AFL forkserver, QEMU loadvm and Nyx by dirty-page count; I could not read numeric values from the plot text.
+  - read: nyx/fast_vm_reload.c, nyx/fast_vm_reload_sync.c, nyx/snapshot/ directory, paper sections 4.1.2 Fast Snapshot Reloads and 5.4 Fast Snapshot Reload Performance
+- **Nyx-Net (incremental snapshots mid-execution)** (rel 3, paper, none declared on GitHub (no licence = no copying)) https://github.com/RUB-SysSec/nyx-net
+  - bottlenecks: P4, C11
+  - Adds incremental snapshots taken inside a test case, so later inputs resume from the middle of a long interaction instead of replaying the prefix. For SIH: a root snapshot after boot plus child snapshots at scenario trigger times (e.g. at takeoff, at failure injection) turn a sweep into a tree of runs sharing prefixes.
+  - speed claim: Paper abstract claim (arXiv 2111.03013): improves test throughput 'by up to 300x' versus state-of-the-art, 10-30x on Super Mario. Hardware not read.
+  - read: arXiv 2111.03013 incremental snapshot section
+- **Nyx: Greybox Hypervisor Fuzzing using Fast Snapshots (USENIX Security 2021)** (rel 3, paper, paper; ideas only) https://www.usenix.org/conference/usenixsecurity21/presentation/schumilo
+  - bottlenecks: P4
+  - Core mechanism to copy conceptually: restore only dirty pages, with KVM keeping a stack of dirty pages so no bitmap scan is needed after each run, plus flattened device-state reset and an in-memory COW disk layer. For SIH the transferable idea is 'track what was written and restore only that', not a full re-init.
+  - speed claim: Claim (abstract): fast snapshot restoration 'allows us to reload the system under test thousands of times per second'; QEMU/KVM VM, hardware not read.
+  - read: Section on fast snapshot restoration (dirty page stack, device state, disk COW), sec21 slides (usenix.org/system/files/sec21_slides_schumilo.pdf)
+- **OMNeT++ configuration scenarios and per-module RNG streams** (rel 3, simulator, not declared on GitHub; treat as idea-only) https://github.com/omnetpp/omnetpp
+  - bottlenecks: C1, C12, P6
+  - A discrete-event simulator whose ini file declares parameter studies with ${...} iteration variables, repeat counts, seed-set and a mapping of each module to its own RNG stream, so draw order cannot change between runs (C1) and each run has an id that reproduces it. Scenario expansion lives in envir/scenario.cc. Licence is not declared on GitHub (OMNeT++ uses its own academic public licence), so ideas only. Source files listed, not read.
+  - speed claim: none
+  - read: src/envir/scenario.cc/.h, src/envir/sectionbasedconfig.cc, src/envir/inifilereader.cc, src/sim/cmersennetwister.cc
+- **OSADL QA Farm real-time latency pages** (rel 3, write-up, web page, no code to lift) https://www.osadl.org/Single-View.111+M52b8092c128.0.html
+  - bottlenecks: P2, P1
+  - Measured effect of CPU sleep states and frequency governor on cyclictest worst-case wake-up latency. Gives a number to argue that idle-state and governor settings can matter as much as the wait primitive.
+  - speed claim: Claim opened and quoted: removing processor.max_cstate=1 gave 'an increase of about 100 us of the worst-case latency'; cyclictest cycle interval 200 us, 100 million loops, 5 h 33 min; plot r1s1 is a 6-core AMD Phenom II X6 1090T. Governor change moved clock from 1600 MHz (ondemand) to 3400 MHz (performance) with 'significant decrease' but no microsecond figure. Page also names an i7-2600K system.
+  - read: the page above; sibling page Real-time-optimization.qa-farm-latency-optimization (configs only, no figures)
+- **OmniDrones** (rel 3, simulator, MIT) https://github.com/btx0424/OmniDrones
+  - bottlenecks: C4, C6, C7, C8, C12
+  - Isaac Sim drone RL suite with a general multirotor model (each rotor has local pose and force-to-moment ratio, so any N-rotor layout), and a domain randomization table split into startup-only vs runtime-changeable items: mass and inertia (both), rotor force constant and motor gain (both), external force such as wind and drag (both), geometry only at startup. That startup-versus-runtime split is a useful taxonomy for C10 and C12.
+  - speed claim: measured per paper (arXiv 2309.12825, Section IV-A, Table III): rollout-collection FPS 196,074 +/- 3,754 at 1,024 envs (Track, 1 agent) up to 732,109 +/- 10,362 at 4,096 envs, RTX 4090, Isaac Sim 2022.2.0; includes observation, reward and logging, dt 0.016. Aerial Gym paper reports OmniDrones native physics at 0.450 x10^6 SPS at 2^12 and a Warp variant far higher (alignment unclear).
+  - read: omni_drones/robots/drone/multirotor.py, omni_drones/robots/drone/iris.py (PX4-style quad), omni_drones/utils/torch.py, omni_drones/controllers/lee_position_controller.py, paper Section III-C Table II
+- **OpenJDK CRaC (Coordinated Restore at Checkpoint)** (rel 3, library, GPL-2.0 with Classpath exception for JDK parts; idea only) https://github.com/openjdk/crac
+  - bottlenecks: P4
+  - Built on CRIU. Its key idea is an application-visible Resource interface with beforeCheckpoint and afterRestore callbacks so each component closes sockets/files before the dump and reopens or reseeds after. That is the hook design a snapshot-capable SIH/uORB/MAVLink would need. I did not open source files; the callback API description is from memory.
+  - speed claim: none
+  - read: src/java.base/share/classes/jdk/crac (Resource, Context, Core) - path from memory, not verified, github.com/CRaC/docs
+- **OpenMDAO DOE drivers and case recorder** (rel 3, library, Apache-2.0 (LICENSE.txt header confirmed; GitHub reports 'other')) https://github.com/OpenMDAO/OpenMDAO
+  - bottlenecks: C12
+  - Ready catalog of experiment-design generators: list, CSV, uniform, full factorial, generalized subset, Plackett-Burman, Box-Behnken, Latin hypercube, plus a sqlite case recorder and reader for results tables. Fits the C12 variable catalog, sweeps and replay design as a Python harness outside the SIH binary.
+  - speed claim: none
+  - read: openmdao/drivers/doe_generators.py (DOEGenerator subclasses), openmdao/drivers/doe_driver.py, openmdao/recorders/sqlite_recorder.py, case_reader.py
+- **Optimizing Logical Execution Time Model for Both Determinism and Low Latency (flexible LET)** (rel 3, paper, ) https://arxiv.org/abs/2310.19699
+  - bottlenecks: C14, P1
+  - Plain LET costs end-to-end latency. Flexible LET shrinks the interval with a virtual offset and deadline while staying deterministic. Gives a way to pick a fixed delay that is smaller than one full tick.
+  - speed claim: none
+  - read: Abstract and the fLET definition section (virtual offset, virtual deadline)
+- **Optuna (samplers, pruners, journal storage)** (rel 3, library, MIT) https://github.com/optuna/optuna
+  - bottlenecks: P3, P6, C12
+  - Three liftable pieces: a QMC sampler, pruners (median, Hyperband, successive halving) that kill a run early when intermediate values look bad, and a journal storage (append-only file or redis) that lets many workers share one study without a database server. Early pruning maps to ending a flight at the first clear failure; the journal maps to a simple multi-process results log.
+  - speed claim: none
+  - read: optuna/samplers/_qmc.py, optuna/pruners/_hyperband.py, _median.py, _successive_halving.py, optuna/storages/journal/_file.py, optuna/samplers/_brute_force.py
+- **Orekit event detectors** (rel 3, library, Apache-2.0 (LICENSE.txt confirmed)) https://gitlab.orekit.org/orekit/orekit
+  - bottlenecks: C10, C11, C14
+  - EventDetector with a root-found g-function and EventHandler.eventOccurred returning an Action (STOP, CONTINUE, RESET_STATE, RESET_DERIVATIVES) is a clean contract for a trigger-based scenario layer. Triggers fire at an exact event time inside the integrator step, not at the next tick.
+  - speed claim: none
+  - read: src/main/java/org/orekit/propagation/events/EventDetector.java, src/main/java/org/orekit/propagation/events/handlers/EventHandler.java (eventOccurred, resetState)
+- **PCG and Random123 (counter-based / small-state RNGs)** (rel 3, library, Apache-2.0 (PCG); Random123 not verified) https://github.com/imneme/pcg-cpp
+  - bottlenecks: C1, P7
+  - PCG (Apache-2.0) is a small-state generator with selectable stream; Random123 (counter-based, Philox/Threefry) allows draw n of stream s to be recomputed at any time, so draw order cannot depend on scheduling and any step can be replayed without stored history. Both are header-only and cheap on MCUs. Random123 licence was not verified (GitHub NOASSERTION). Outside the strict live-control domain but it underpins C1 and C12.
+  - speed claim: none
+  - read: pcg-cpp: include/pcg_random.hpp, DEShawResearch/random123: include/Random123/philox.h, threefry.h
+- **PCG random number generators (pcg-c, pcg-cpp)** (rel 3, library, Apache-2.0 (also MIT option per project; adapt with attribution)) https://github.com/imneme/pcg-c
+  - bottlenecks: C1, P7
+  - Small-state generators with selectable stream (increment) parameter: one seed + a stream id gives independent sequences, and advance (jump-ahead) in O(log n). pcg32 has 64-bit state, good fit for flash/RAM-limited boards and for seeking to step N after restore.
+  - speed claim: none
+  - read: include/pcg_variants.h at 83252d9c23df9c82ecb42210afed61a7b42402d7 (pcg32_srandom_r(initstate, initseq), pcg32_advance_r), https://www.pcg-random.org/
+- **PGFuzz (policy-guided fuzzing for robotic vehicles)** (rel 3, tool, none declared (all rights reserved; ideas only)) https://github.com/purseclab/PGFuzz
+  - bottlenecks: C11, C12
+  - Per-policy folders hold the commands, environment variables, parameters and preconditions to mutate, and an input generator mutates them toward a policy violation. Gives a catalogue of which PX4/ArduPilot parameters and commands matter and a feedback loop (distance to violating a temporal-logic policy). Drives real SITL so its per-run cost is the problem SIH removes.
+  - speed claim: none
+  - read: ArduPilot/pgfuzz.py, ArduPilot/input_generator.py, ArduPilot/fuzzing.py, ArduPilot/policies/*/{cmds,envs,parameters,preconditions}.txt, ArduPilot/meta_parameters.txt, ArduPilot/param boundary/check_param_boundary.py, paper: https://www.ndss-symposium.org/ndss-paper/pgfuzz-policy-guided-fuzzing-for-r
+- **PSY-TaLiRo (Python S-TaLiRo successor)** (rel 3, library, BSD-3-Clause) https://github.com/cpslab-asu/psy-taliro
+  - bottlenecks: C11, C12
+  - Clean separation of model under test, specification (RTAMT or Banquo backends), optimizer and options; the staliro 'cost function = robustness' loop is the standard falsification harness. Useful as an API sketch for an SIH sweep driver.
+  - speed claim: none
+  - read: src/staliro/models.py, src/staliro/cost_func.py, src/staliro/optimizers.py, src/staliro/options.py, src/staliro/specifications/rtamt.py, src/staliro/tests.py
+- **PX4 EKF2 sensor_simulator (unit-test sensor feeders) and replay data** (rel 3, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/ekf2/test/sensor_simulator
+  - bottlenecks: C3, C11, C13
+  - A deterministic, step-scripted sensor injector that the EKF tests already use: GPS step in height or horizontal position, position-rate drift, fix type, satellite count, PDOP; baro, mag, range, flow, airspeed, vio feeders with their own rates, and a ulog-to-sensor-data converter plus replay CSV. Shows the vocabulary of 'change this at time t' events and how change-indication tests compare EKF output with golden CSVs, which maps onto C11 and C13.
+  - speed claim: none
+  - read: src/modules/ekf2/test/sensor_simulator/gps.h and gps.cpp (stepHeightByMeters, stepHorizontalPositionByMeters, setPositionRateNED, setFixType), src/modules/ekf2/test/sensor_simulator/sensor_simulator.cpp, src/modules/ekf2/test/sensor_simulator/convertULogToSensorData.py, src/modules/ekf2/test/change_
+- **PX4 EKF2 sensor_simulator test harness** (rel 3, source-file, BSD-3-Clause (same as PX4)) https://github.com/PX4/PX4-Autopilot/tree/main/src/modules/ekf2/test/sensor_simulator
+  - bottlenecks: C11, C13, C3
+  - In-tree, BSD-3 C++ that drives EKF2 with scripted synthetic sensors (imu, gps, baro, mag, flow, airspeed, gnss_yaw) with step changes (stepHorizontalPositionByMeters, setFixType, setNumberOfSatellites, setPdop), fault start/stop, plus createSensorDataFile.py and convertULogToSensorData.py for replay from logs. Good pattern for scripted timeline faults and for golden-trace tests (C13).
+  - speed claim: none
+  - read: src/modules/ekf2/test/sensor_simulator/gps.cpp (setData, step*, setFixType), sensor_simulator.cpp (schedule and run loop, not opened), createSensorDataFile.py, convertULogToSensorData.py
+- **PX4 PR #26504 mavsdk_tests wall-clock timeouts for SIH lockstep; #10648 Make SITL tests faster than real-time; #22811** (rel 3, write-up, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/26504
+  - bottlenecks: P3, C14
+  - History of how the project scales wall-clock timeouts by speed factor, which is the P3 problem (COM_DL_LOSS_T scaling in rcS). Read for a cleaner approach: tie timeouts to simulated time rather than scale parameters.
+  - speed claim: none
+  - read: PR #26504 diff, PR #10648 and #22811, ROMFS/px4fmu_common/init.d-posix/rcS (speed factor handling)
+- **PX4 PR #29218 px4_usleep via nanosleep, and #26608 calibration CPU starvation on linux** (rel 3, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29218
+  - bottlenecks: P2, P8, P5
+  - Merged change to the sleep primitive that SIH's usleep(100) and usleep(sleep_time) ride on, and a related fix for CPU starvation under high-rate sensor data. Read to see the new wait semantics and whether SIH's wall-clock usleep should use the same path or a futex/eventfd wake instead of polling.
+  - speed claim: none
+  - read: platforms/posix px4_usleep implementation changed by PR #29218, PR #26608 diff
+- **PX4 PR #29332 MAVSDK integration tests rewritten in Python (pytest), runner starts fresh PX4 per case; #26032 SIH integration tests** (rel 3, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29332
+  - bottlenecks: P4, P6, C11, C13
+  - Current test harness: sih-sitl.json model list, a runner that starts a fresh PX4 for each test (the P4 cost) and refuses concurrency (P6). Shows the supervisor shape a scenario layer (C11) would extend, and where speed-factor timeouts are scaled. Closed attempts: #24237 'SIH-SITL integration tests' (superseded by #26032), #23997 'ci: sitl at max speed' (set speed factor 5, closed), #27945 CI modernize (closed).
+  - speed claim: Claim only: 'All SIH models in sih-sitl.json (quadx, hex, standard_vtol, xvert) pass locally at speed factor 10 and 30' (PR body, no hardware stated).
+  - read: test/mavsdk_tests/mavsdk_test_runner.py, test/mavsdk_tests/integration_test_runner/test_runner.py and process_helper.py, test/mavsdk_tests/configs/sih-sitl.json, test/mavsdk_tests/conftest.py, Tools/packaging/containers/test_sih_mission.py
+- **PX4 PR #29601 failure_injection wrong, garbage and drift IMU failures (open) and #27832 failure injection on hardware/RC switch (merged)** (rel 3, write-up, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29601
+  - bottlenecks: C2, C3, C11, P8
+  - Existing failure_injection topic and command path is the natural hook for a C11 scenario layer. Check overlap with the IMU error model work before writing new IMU fault code. Not read in depth.
+  - speed claim: none
+  - read: PR #29601 file list, docs/en/debug/failure_injection.md, PR #27832
+- **PX4 SITL Gazebo Classic mavlink_interface lockstep** (rel 3, source-file, no license reported by GitHub API (check file headers before copying)) https://github.com/PX4/PX4-SITL_gazebo-classic/blob/main/src/mavlink_interface.cpp
+  - bottlenecks: P1, P8
+  - The other side of PX4 lockstep. Its poll loop waits at most 10 ms for the actuator packet when lockstep is on and the vehicle is armed, with a comment about avoiding a 'two-sided lockstep timeout loop' on arming. That is a documented failure mode and a bounded-wait design to compare with SIH's open-ended poll.
+  - speed claim: none
+  - read: src/mavlink_interface.cpp lines ~385-415 (needs_to_wait_for_actuator, poll timeout), received_first_actuator_ handling near lines 563-681
+- **PX4 Tools/ecl_ekf (log analysis with pass/fail checks and batch processing)** (rel 3, tool, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/Tools/ecl_ekf
+  - bottlenecks: C12, C13
+  - A batch ULog analyser with named metrics, check levels (check_level_dict.csv, check_table.csv), detectors, and a CSV and PDF report. It is a ready pattern for a results table over many runs and for pass/fail thresholds.
+  - speed claim: none
+  - read: batch_process_logdata_ekf.py, analysis/checks.py, analysis/metrics.py, analysis/detectors.py, check_level_dict.csv, check_table.csv
+- **PX4 failure injection command and simulator hook** (rel 3, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/src/systemcmds/failure/failure.cpp
+  - bottlenecks: C3, C11
+  - The existing PX4 mechanism (SYS_FAILURE_EN, failure command, vehicle_command) for turning sensor and motor failures on at run time. A scenario layer for SIH can reuse this command path rather than invent a new one, and extend the failure types to the IMU error model gaps (bias, drift, clipping).
+  - speed claim: none
+  - read: src/systemcmds/failure/failure.cpp, src/modules/simulation/simulator_mavlink/SimulatorMavlink.cpp (where failures are consumed in the other simulator), docs: https://docs.px4.io/main/en/debug/failure_injection
+- **PX4 forum thread: 'EKF2 replay not determenistic' (v1.14.2) and related 'EKF2 replay results don't match'** (rel 3, write-up, forum text) https://discuss.px4.io/t/ekf2-replay-not-determenistic/48846
+  - bottlenecks: C13, P5
+  - Evidence that PX4 without lockstep gives different results per run because 'timing + scheduler order changes', and that enabling ENABLE_LOCKSTEP_SCHEDULER makes runs repeatable. Even with lockstep, replay output did not match the original log. Lockstep alone is not enough for bit-identical replay, so a SIH determinism check must also cover work-queue ordering and the rand() stream (C1). Forum replies, not official statements. The sister thread 41693 (v1.14, estimates differ from the log) was found by search only, not opened.
+  - speed claim: none
+  - read: https://discuss.px4.io/t/ekf2-replay-not-determenistic/48846, https://discuss.px4.io/t/ekf2-replay-results-dont-match/41693 (not opened)
+- **PX4 lat_lon_alt.cpp (what SIH does today)** (rel 3, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/src/lib/lat_lon_alt/lat_lon_alt.cpp
+  - bottlenecks: P7
+  - Baseline. fromEcef already uses the Borkowski closed form (Groves appendix C): one sqrt, three cbrt, an atan2, atan, cos, sin per call, all in double. ecefToNed then calls it every step, then computeRotEcefToNed (sin and cos of lat and lon again) and MapProjection project in sih.cpp equations_of_motion. Cheap wins: reuse sin/cos between calls, skip when the vehicle has not moved, or use a Bowring-type method. SIH also stops a ground impact in one step with -v/dt*mass, so ground force depends on step size.
+  - speed claim: none
+  - read: src/lib/lat_lon_alt/lat_lon_alt.cpp: fromEcef, computeRotEcefToNed, deltaLatLonToDeltaXY, simulator_sih/sih.cpp: equations_of_motion lines 670-763, ecefToNed
+- **PX4 lat_lon_alt.cpp (what SIH does today), for reference** (rel 3, source-file, BSD-3-Clause) https://raw.githubusercontent.com/PX4/PX4-Autopilot/95a0c23482329183d932ac99da00faa7e8d63143/src/lib/lat_lon_alt/lat_lon_alt.cpp
+  - bottlenecks: P7
+  - Opened it: fromEcef is a closed-form Borkowski/Groves solution using 1 sqrt, 2 cbrt, a few sqrt, atan and atan2 per call in double; toEcef is the standard prime-vertical formula. Per step sih.cpp ecefToNed (lines ~745-760) additionally builds the ECEF-to-NED DCM, converts it to a quaternion and normalizes, and _lpos_ref.project runs per step. So the hot path does about a dozen transcendental calls per tick; fine to leave unless a profile says otherwise. sih.cpp lines 733-739 show the attitude update already uses an exact axis-angle increment (_q_E * Quatf(AxisAnglef(_w_B*dt))), i.e. an exponential-map step, and the angular-velocity update is forward Euler on the Euler equation with a clamp at 6 pi rad/s; velocity is forward Euler in float, ECEF position is trapezoidal in double.
+  - speed claim: none
+  - read: lat_lon_alt.cpp: LatLonAlt::fromEcef, toEcef, computeRotEcefToNed, sih.cpp: Sih::equations_of_motion (lines ~670-745), Sih::ecefToNed (~746-760)
+- **PX4 world_magnetic_model (geo_mag_declination, geo_magnetic_tables)** (rel 3, library, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/95a0c23482329183d932ac99da00faa7e8d63143/src/lib/world_magnetic_model
+  - bottlenecks: C3, C5
+  - Already in-tree and flash-aware: a table-driven declination, inclination and field-strength lookup with a script (fetch_noaa_table.py) that regenerates the table. SIH's mag model could use location-dependent field instead of a constant. It needs a check of how SIH currently sets the field, and the table may only give angles and strength. BSD-3-Clause.
+  - speed claim: none
+  - read: src/lib/world_magnetic_model/geo_mag_declination.cpp, src/lib/world_magnetic_model/geo_magnetic_tables.hpp, src/lib/world_magnetic_model/fetch_noaa_table.py
+- **PX4 world_magnetic_model library** (rel 3, library, BSD-3-Clause (PX4)) https://github.com/PX4/PX4-Autopilot/tree/main/src/lib/world_magnetic_model
+  - bottlenecks: C3
+  - Already in the PX4 tree and BSD-3: geo_mag_declination.cpp plus geo_magnetic_tables.hpp (lat/lon grid of declination, inclination, strength) with fetch_noaa_table.py and tests. Gives SIH a position-dependent field with no new dependency, so mag error models (hard/soft iron, disturbance) have the right base field. Check what SIH currently uses for its mag vector first (not read).
+  - speed claim: none
+  - read: src/lib/world_magnetic_model/geo_mag_declination.cpp and .h, geo_magnetic_tables.hpp, fetch_noaa_table.py
+- **Paparazzi NPS sensor models** (rel 3, source-file, GPL-2.0 (ideas only, no text may be copied)) https://github.com/paparazzi/paparazzi
+  - bottlenecks: C2, C3, C14
+  - Another autopilot's in-process simulator sensors. nps_sensor_gyro/accel/mag/baro/gps/airspeed/sonar each have rate-limited update (next_update), sensitivity matrix, neutral, noise std, initial bias, bias random walk, ADC rounding and saturation. Params are split into default and 'noisy' header presets, an easy pattern for presets.
+  - speed claim: none
+  - read: sw/simulator/nps/nps_sensor_gyro.c nps_sensor_gyro_run_step at 377ca9890d44b4cc4f1db98de886c508a0075624, conf/simulator/nps/nps_sensors_params_noisy.h and nps_sensors_params_default.h, sw/simulator/nps/nps_sensor_gps.c, nps_sensor_baro.c, nps_sensor_mag.c
+- **Paper: An Architecture for Exploiting Native User-Land Checkpoint-Restart to Improve Fuzzing (DMTCP-based)** (rel 3, paper, paper (no code found)) https://arxiv.org/abs/2112.10100
+  - bottlenecks: P4, P6
+  - Checkpoint the target at a point of interest with DMTCP, restore, attach the driver afterwards, optionally start a fork server at the restore point; take a series of checkpoints and run parallel tests from them. Direct template for 'boot once, converge once, fan out many runs' without kernel modules.
+  - speed claim: none
+  - read: abstract and architecture section of arXiv 2112.10100
+- **Parallel Fast: An Efficient Coupling Approach for Co-Simulation with Different Coupling Step Sizes (Holzinger et al., Modelica 2021)** (rel 3, paper, ) https://doi.org/10.3384/ecp21181649
+  - bottlenecks: P1, P5, C14
+  - Opened the article page: a separate synchronization step size is decoupled from each unit's step; units that finish early are synchronized in intervals; an extrapolation measure picks the sync step to minimize error. Reported as strongest for HiL real-time. Page gives no numbers and does not mention Jacobi or Gauss-Seidel. PDF not read.
+  - speed claim: none
+  - read: Full PDF at ecp.ep.liu.se/index.php/modelica/article/view/244, extrapolation measure and sync-step optimization sections
+- **Pat: PX4 to MuJoCo bridge (Holiday-66/px4-mujoco-bridge)** (rel 3, runner-or-infrastructure, BSD-3-Clause) https://github.com/Holiday-66/px4-mujoco-bridge
+  - bottlenecks: P1, P2, P8, C11, C14
+  - Small, recent, documented lockstep client for stock PX4 over MAVLink: per-cycle contract (send sensors stamped t, wait for actuator reply, advance physics by exactly 4 ms, then pace), required fresh actuator reply, and a defined failure mode (2 s wall-clock actuator timeout makes the bridge exit without advancing that physics step). That timeout-and-exit semantic is the model for a scenario runner that quits with a status (C11) and for bounding P8-style stalls. Simulation time only from physics, never wall clock.
+  - speed claim: none
+  - read: docs/architecture.md (Startup and lockstep section, HIL message rate table), docs/validation.md, src/px4_mujoco_bridge/
+- **PhysX scene step split (collide, fetchCollision, advance) and TGS solver** (rel 3, physics-engine, BSD-3-Clause (copyable with attribution)) https://github.com/NVIDIA-Omniverse/PhysX
+  - bottlenecks: P1, P5, P7
+  - The scene API can split simulate into collide() then fetchCollision() then advance(), so user work overlaps the first half and results are fetched by checkResults(block). The same idea in SIH is to run the wait for actuators across a phase that is already needed instead of polling. PxSolverType has PGS and Temporal Gauss-Seidel, which is the substepping idea of the Macklin paper in a shipping engine.
+  - speed claim: none
+  - read: physx/include/PxScene.h (collide, fetchCollision, advance, checkResults), physx/include/PxSceneDesc.h (PxSolverType::eTGS, eENABLE_STABILIZATION)
+- **PretVM: Predictable, Efficient Virtual Machine for Real-Time Concurrency (arXiv 2406.06253)** (rel 3, paper, paper) https://arxiv.org/abs/2406.06253
+  - bottlenecks: P5, C14
+  - Executes quasi-static schedules compiled from Lingua Franca programs, so reaction order and timing are fixed ahead of time instead of decided by thread wake-ups. The abstract says it compares against the default dynamic LF scheduler. Relevant as an argument and recipe for replacing dynamic work-queue scheduling with a precomputed order in lockstep.
+  - speed claim: none
+  - read: Abstract and evaluation section comparing the static-schedule PretVM with the dynamic LF scheduler (numbers not read)
+- **Project Aria IMU noise model doc** (rel 3, write-up, Apache-2.0) https://facebookresearch.github.io/projectaria_tools/docs/tech_insights/imu_noise_model
+  - bottlenecks: C2
+  - A published, worked noise model from real Allan analysis (24 h in a temperature-stable room): turn-on bias plus bias random walk plus white noise, white-noise density and bias instability tables, and an explicit 'inflate by a tuning factor' step. Gives realistic order-of-magnitude values to seed defaults. Apache-2.0 repo.
+  - speed claim: none
+  - read: website/docs-technical-specs/device/imu_noise_model.mdx (Table 1 and Table 2)
+- **Proton / Valve Wine fsync (futex_waitv-based WaitForMultipleObjects)** (rel 3, source-file, LGPL-2.1-or-later (idea only)) https://github.com/ValveSoftware/wine/blob/proton_9.0/dlls/ntdll/unix/fsync.c
+  - bottlenecks: P5
+  - Real-world use of futex_waitv as a multi-object wait. Objects are shared-memory futex words, so wake is futex_wake(addr, INT_MAX) (lines ~632, 697, 753, 827) and the waiter calls futex_wait_multiple over up to MAXIMUM_WAIT_OBJECTS+1 words. It is a worked example of the wait-side pattern and of how to build a wait-any over several lockstep components. Read it for the compare-then-wait race handling (EAGAIN retry) and the timeout handling.
+  - speed claim: none
+  - read: dlls/ntdll/unix/fsync.c: futex_vector_set, futex_wait_multiple (~135 to 160), fsync_wait_objects (~1425), the wait loop around line 924
+- **Pseudo-Random UAV Test Generation Using Low-Fidelity Path Simulator (PRGenUAV-LFS)** (rel 3, paper, ) https://arxiv.org/abs/2503.24172
+  - bottlenecks: P3, P4, C12
+  - Argues that high-fidelity simulation is the cost driver in UAV test search, builds a low-fidelity PX4-derived simulator and screens candidates there before re-validating hits in the full simulator. Directly supports the case for an in-process fast physics layer plus a screening-then-confirm sweep strategy. Code location not found in this pass.
+  - speed claim: claim, from the abstract and body at https://arxiv.org/html/2503.24172v1: 'one order of magnitude faster than the HFS'; 'simulating a single UAV test case with Aerialist can take several minutes'. No hardware stated in what I read.
+  - read: sections describing the LFS construction and the HFS validation step, evaluation tables comparing tests per hour
+- **PyBaMM Thevenin equivalent-circuit model** (rel 3, library, BSD-3-Clause confirmed from LICENSE.txt (Copyright 2018 the PyBaMM team). Code can be adapted with attribution.) https://github.com/pybamm-team/PyBaMM
+  - bottlenecks: C6
+  - Reference structure for a Thevenin cell: OCV(SoC) element, R0 series resistor, N RC pairs, optional thermal. An ECM with R0 plus one RC pair and tables for OCV, R0, R1, C1 versus SoC is a few dozen bytes of table and one state update per step, which gives sag with relaxation. The solver stack is far too heavy to embed; lift only the model structure and the table layout. The ECM_Example parameter CSVs are an example, not a real cell.
+  - speed claim: none
+  - read: packages/pybamm/src/pybamm/models/full_battery_models/equivalent_circuit/thevenin.py, packages/pybamm/src/pybamm/models/submodels/equivalent_circuit_elements/ (ocv_element, rc_element, resistor_element, thermal), packages/pybamm/src/pybamm/parameters/ecm_parameters.py, packages/pybamm/src/pybamm/inp
+- **PyBullet / Bullet physics server (changeDynamics, saveState/restoreState, setPhysicsEngineParameter)** (rel 3, physics-engine, zlib) https://github.com/bulletphysics/bullet3
+  - bottlenecks: C10, C7, C9, C8, P4
+  - Runtime-editable mass, inertia, friction, restitution and damping per body (processChangeDynamicsInfoCommand), step size and solver iterations at run time (processSendPhysicsParametersCommand), applied external force and torque (processApplyExternalForceCommand), and in-memory saveState/restoreState snapshots (P4). The command processor is a model for a typed command queue to a physics core. zlib licence (permissive, attribution not required in binaries).
+  - speed claim: none
+  - read: examples/SharedMemory/PhysicsServerCommandProcessor.cpp: processChangeDynamicsInfoCommand (L10656), processSendPhysicsParametersCommand (L11423), processApplyExternalForceCommand (L12609), processSaveStateCommand (L14772), processRestoreStateCommand (L14837)
+- **PyFlyt wind fields and lifting-surface / motor abstractions** (rel 3, simulator, MIT) https://github.com/jjshoots/PyFlyt
+  - bottlenecks: C4, C6, C7, C12
+  - A small MIT-licensed UAV simulator over PyBullet with a pluggable wind-field base class (hooked to the aircraft by position and time), a generic lifting-surface class and a motor class with configurable lag and thrust curve. A tidy reference for generalising SIH wind (C4), motors (C6) and wing aerodynamics (C7). Python, so lift the structure and equations.
+  - speed claim: none
+  - read: PyFlyt/core/abstractions/base_wind_field.py, PyFlyt/core/wind/, PyFlyt/core/abstractions/lifting_surfaces.py, PyFlyt/core/abstractions/motors.py, PyFlyt/core/abstractions/boring_bodies.py
+- **QEMU icount virtual clock with idle warp (accel/tcg/icount-common.c)** (rel 3, source-file, GPL-2.0. Reimplement the idea only.) https://github.com/qemu/qemu/blob/master/accel/tcg/icount-common.c
+  - bottlenecks: P3, P2
+  - Opened the source. The proven way to get 'as fast as possible' for a clock-driven guest: the virtual clock is derived from executed work, and when the CPU is idle icount_start_warp_timer advances it directly to the next timer deadline. 'sleep=off' (icount_sleep=false) means the guest never really sleeps. Its doc is docs/devel/tcg-icount.rst. Lift the rule 'when every participant is waiting, warp to the earliest pending deadline' as the unthrottled mode for SIH instead of a speed-factor multiplier that rcS has to scale timeouts from.
+  - speed claim: none
+  - read: accel/tcg/icount-common.c: icount_start_warp_timer, icount_warp_rt, icount_account_warp_timer (lines ~231-400), docs/devel/tcg-icount.rst
+- **QEMU icount with sleep=off (virtual clock jumps to next timer when idle)** (rel 3, simulator, GPL-2.0-or-later: idea only, no text copy) https://github.com/qemu/qemu/blob/master/docs/devel/tcg-icount.rst
+  - bottlenecks: P3, P8, C14
+  - Quoted from qemu-options.hx: with sleep=off 'the virtual time will jump to the next timer deadline instantly whenever the virtual cpu goes to sleep mode and will not advance if no timer is enabled. This behavior gives deterministic execution times from the guest point of view.' That is the clean definition of unthrottled mode (P3): rather than a speed multiplier, skip the wait to the next event. The rr=record|replay option is a replay design reference (C12/C13). Note the manual says sleep=off cannot combine with shift=auto or align=on.
+  - speed claim: none
+  - read: qemu-options.hx: the -icount entry, accel/tcg/icount-common.c, system/cpu-timers.c, include/system/cpu-timers.h, docs/devel/tcg-icount.rst
+- **QEMU icount, virtual clock and record/replay** (rel 3, simulator, GPL-2.0-or-later (mixed); idea only) https://github.com/qemu/qemu
+  - bottlenecks: P2, P3, P8, C13
+  - The virtual clock advances by executed instructions (icount); with sleep=on, idle time is skipped by warping virtual time to the next timer deadline, while sleep=off follows real time. icount_adjust slews the shift to track wall time. Record/replay (rr=record|replay) logs non-deterministic inputs for exact replay. Mechanism for P8-style stalls, idle skipping and a record-replay layer for C13.
+  - speed claim: none
+  - read: accel/tcg/icount-common.c: icount_adjust (~169), icount_warp_rt (~231), icount_start_warp_timer (~292), replay/replay-time.c, docs/devel/replay.rst, docs/devel/clocks.rst, system/cpu-timers.c
+- **QMCPy (quasi-Monte Carlo with adaptive stopping)** (rel 3, library, Apache-2.0) https://github.com/QMCSoftware/qmcpy
+  - bottlenecks: C12
+  - Stopping criteria that keep adding Sobol/lattice points until an error tolerance is met, i.e. sequential sampling instead of a fixed N. Relevant to 'how many flights are enough'.
+  - speed claim: none
+  - read: stopping criterion classes in the qmcpy package (paths not listed in this pass)
+- **QuadSwarm (quad-swarm-rl)** (rel 3, simulator, none found (no LICENSE file at repo root; treat as all rights reserved)) https://github.com/Zhehui-Huang/quad-swarm-rl
+  - bottlenecks: P5, P6, C1, C6, C14
+  - CPU-only multi-quadrotor RL sim built to scale over cores. Motor model uses an Ornstein-Uhlenbeck thrust noise (thrust_noise_ratio of signal), asymmetric motor strengths renormalized to sum to 4, separate motor_damp_time_up/down, linearity-corrected angvel to thrust, rotor drag and roll coefficients, all with a Numba-jitted variant. Also inter-drone downwash (aerodynamics/downwash.py) and speed-test files next to unit tests. No license file: reimplement ideas only.
+  - speed claim: claim (abstract, arXiv 2306.09537): 'over 48,500 simulation samples per second (SPS)' for one quadrotor and 'over 62,000 SPS' for eight quadrotors on a 16-core CPU. Paper body not read (PDF unreadable via fetch).
+  - read: gym_art/quadrotor_multi/quadrotor_dynamics.py (init_thrust_noise, motor_tau_up/down, motor_assymetry, step), gym_art/quadrotor_multi/numba_utils.py (OUNoiseNumba, angvel2thrust_numba), gym_art/quadrotor_multi/aerodynamics/downwash.py, gym_art/quadrotor_multi/quadrotor_randomization.py, gym_art/quadr
+- **Quantifying the Sim2real Gap for GPS and IMU Sensors (arXiv 2403.11000)** (rel 3, paper, unknown) https://arxiv.org/abs/2403.11000
+  - bottlenecks: C13, C2, C3
+  - Compares five simulated sensor noise models against 40 real runs by using a state estimator as the judge, since raw-sample comparison fails. Directly reusable method for proving a new SIH noise model is realistic: run EKF2 on real and simulated data and compare estimator outputs. Open dataset.
+  - speed claim: none
+  - read: abstract and experimental-setup section; AirSim and Chrono noise model descriptions
+- **Quantum Leaps QP/C++ (QV cooperative run-to-completion kernel)** (rel 3, library, GPL-3.0-or-later OR commercial (confirmed in qv.cpp header): reimplement the idea only) https://github.com/QuantumLeaps/qpcpp
+  - bottlenecks: P5, P1
+  - The QV kernel runs every active object to completion on one stack in a single loop (readySet.findMax, dispatch, repeat; onIdle when empty). That is a minimal single-threaded work-queue replacement. QP also has a software-tracing component, QS, for golden traces.
+  - speed claim: none
+  - read: src/qv/qv.cpp: QV::run loop (lines ~99-165), src/qf/qf_time.cpp (time events), src/qs/ (software tracing)
+- **RIOT OS 'native' CPU (cpu/native)** (rel 3, runner-or-infrastructure, LGPL-2.1 (not confirmed from a file header). Reimplement ideas only, do not copy text.) https://github.com/RIOT-OS/RIOT/tree/master/cpu/native
+  - bottlenecks: P5, P2
+  - Opened the source. A single host thread runs every RIOT thread as a ucontext, with interrupts emulated as host signals, a pending-signal counter (_native_pending_signals) and sigprocmask for irq_disable/irq_enable (irq.c). Timers use timer_create on CLOCK_MONOTONIC delivered through SIGALRM (periph/timer.c). Zero cross-thread wake-ups. The 'interrupt deferred until irq_enable' counter is a neat way to avoid wake-ups from notifications while a section is held. Real-time only, no virtual time.
+  - speed claim: none
+  - read: cpu/native/irq.c: irq_disable, irq_enable, native_irq_handler, _native_pending_signals, cpu/native/periph/timer.c: native_isr_timer, timer_init, cpu/native/cpu.c (idle and context switch)
+- **Rapier enhanced-determinism feature and determinism guide** (rel 3, physics-engine, Apache-2.0) https://rapier.rs/docs/user_guides/rust/determinism/
+  - bottlenecks: C13, P7
+  - Explains the two preconditions: same insertion order into sets, and a feature switch that routes math through libm for bit-equal results across machines; also warns that inputs computed with sin/sqrt are not portable. The libm-switch pattern maps to SIH as a deterministic-math build option.
+  - speed claim: none
+  - read: docs page 'Determinism', Cargo feature enhanced-determinism
+- **SBFT/ICST UAV Testing Competition repo and reports** (rel 3, write-up, MIT) https://github.com/skhatiri/UAV-Testing-Competition
+  - bottlenecks: C12, C11
+  - Defines a tool interface and test-case file format for generated UAV tests, with a random generator baseline and yearly reports comparing tools by effectiveness and diversity. Source of the metrics for judging a sweep (failures found, diversity).
+  - speed claim: none
+  - read: snippets/random_generator.py, snippets/testcase.py, snippets/cli.py, reports/UAV_Competition_SBFT_2025.pdf, reports/UAV_Competition_ICST_2025.pdf, reports/UAV_Competition_SBFT_2024.pdf
+- **SEER: event-driven runtime for parallel MARL environment execution** (rel 3, paper, No code link on the arXiv page; unknown) https://arxiv.org/abs/2611.07996
+  - bottlenecks: P5, P1, C14
+  - Models each step as a bounded stream of timestamped events. Per-entity local queues keep causal order, cross-entity effects become ordered future events, and CAS-based queues feed a shared worker pool. Outputs are 'serial-equivalent' at step boundaries, which is the determinism property SIH needs. Useful for a run-to-completion, time-ordered event queue (sensor latency, actuator delay, scheduled faults) in place of threads. The abstract does not say how idle workers wait, so read the paper.
+  - speed claim: Claim from the abstract page: environment-execution latency down 46.9% vs ROSS-T, 19.5% vs NBSE and 64.9% vs ROOT-Sim on a communication-heavy workload (PCS); 16.2% lower inference latency on the Aircraft workload. Hardware not given on the page.
+  - read: arXiv 2611.07996 HTML: dual-layer event queue section and STPA (thread-pool selection) section, its baselines ROSS and ROOT-Sim are parallel discrete-event simulators and are leads worth a look (not checked)
+- **Sample Factory (APPO, double-buffered sampling)** (rel 3, library, MIT (confirmed via gh)) https://github.com/alex-petrenko/sample-factory
+  - bottlenecks: P1, P5
+  - Double-buffered sampling alternates two groups of environments, so a worker steps one group while the other waits for its action. The idea for a time master is to overlap the stack's compute for tick N with the physics for tick N+1 instead of strictly waiting. For SIH that would change lockstep semantics, so it can only be an opt-in mode. Shared-memory tensors with FIFO signal queues are also a pattern.
+  - speed claim: Claim from the abstract (via search summary): above 1e5 environment frames per second on 3D control problems. About 4x wall-clock over SeedRL on VizDoom, also from a summary. I did not verify hardware.
+  - read: paper arXiv:2006.11751, section on double-buffered sampling, sample_factory/algo/sampling/ (rollout worker and inference worker)
+- **Sanchez-Cuevas, Heredia, Ollero: Multirotor UAS Ground Effect and Ceiling Effect (2017)** (rel 3, paper, Paper) https://idus.us.es/handle/11441/94910
+  - bottlenecks: C6, C7
+  - Semi-empirical ground and ceiling effect for multirotors derived from the image-source method, with test-bench and outdoor flight fits. The search returned this handle for the Sanchez-Cuevas line of work, but I did not open the page to confirm it is the exact 2017 paper. A closed-form thrust ratio with fitted constants that is cheap to evaluate per rotor.
+  - speed claim: none
+  - read: The thrust-ratio formula and fitted coefficients for ground and ceiling effect, The second handle https://idus.us.es/handle/11441/136434 also appeared in the same search and may be a related paper
+- **Scenic (probabilistic scenario language) and VerifAI** (rel 3, tool, BSD-3-Clause (Scenic); VerifAI BSD-3-Clause) https://github.com/Scenic-Foundation/Scenic
+  - bottlenecks: C12, C11, C1, C13
+  - Scenarios as distributions over scenes plus dynamic behaviours and monitors; simulator interfaces are small (setup, step, getProperties) for CARLA, Webots and a Newtonian simulator. Docs describe 'require always' temporal checks and seeded sampling, so a failing run can be replayed from a seed. VerifAI (BSD-3) layers falsifier and samplers (Halton, grid, cross-entropy, Bayesian optimisation, multi-armed bandit) on top. Heavy Python, so lift the structure: sampler, then scenario spec, then simulate, then monitor, then record, then resample.
+  - speed claim: none
+  - read: src/scenic/core/simulators.py (Simulator/Simulation step loop), src/scenic/core/dynamics/scenarios.py, behaviors.py, guards.py, src/scenic/core/external_params.py, src/scenic/simulators/newtonian/simulator.py (smallest interface), BerkeleyLearnVerify/VerifAI: src/verifai/falsifier.py, monitor.py, sa
+- **Scheduling Analysis of UAV Flight Control Workloads on PREEMPT_RT Linux Using a Raspberry Pi 5 (arXiv 2604.19275)** (rel 3, paper, arXiv paper) https://arxiv.org/abs/2604.19275
+  - bottlenecks: P2, C14
+  - Measures a 250 Hz control loop (the same rate as SIH SITL) under stress on standard vs PREEMPT_RT kernels and attributes the difference to deferred softirq wake-up vs direct wake-up. Gives a latency model for what jitter to expect and how to inject it for C14.
+  - speed claim: Quoted from the abstract I opened: worst-case latency 'exceeding 9 ms' on the standard kernel and 'under 225 microseconds' with PREEMPT_RT (about 88 percent lower), 250 Hz loop, Raspberry Pi 5, under heavy stress.
+  - read: abstract and results sections
+- **Seastar reactor (poll mode vs interrupt mode, eventfd/timerfd, sleeping flag)** (rel 3, library, Apache-2.0) https://github.com/scylladb/seastar/blob/master/src/core/reactor.cc
+  - bottlenecks: P2, P3, P5
+  - Run-to-completion loop that polls while busy and, when idle, tries to enter 'interrupt mode' (try_enter_interrupt_mode) then sleeps on epoll/eventfd with a _sleeping flag that producers check before writing the eventfd, so wake syscalls are skipped when the reactor is awake. Also timerfd-based task quota timer. Shows the busy-vs-sleep switch with reported sleep_time metrics.
+  - speed claim: none
+  - read: src/core/reactor.cc: try_enter_interrupt_mode, exit_interrupt_mode, _sleeping.store near line 3051, _notify_eventfd, _task_quota_timer
+- **Seastar reactor backend (timerfd, eventfd wakeup, sleep gating)** (rel 3, library, Apache-2.0 (adaptable with attribution)) https://github.com/scylladb/seastar/blob/6a752c50208583cb122c1b7c0a405804a94805d2/src/core/reactor_backend.cc
+  - bottlenecks: P2, P5
+  - Poll-mode versus sleep-mode switching: the reactor busy-polls while work is flowing and only sleeps (io_pgetevents with timeout, eventfd and an absolute-time timerfd to wake) when it decides it may sleep. Shows timerfd with TFD_TIMER_ABSTIME set on CLOCK_MONOTONIC and spurious-wakeup protection.
+  - speed claim: none
+  - read: src/core/reactor_backend.cc: make_timerfd, arm timer with timerfd_settime(TFD_TIMER_ABSTIME), aio_storage_context::can_sleep, the poll loop around io_pgetevents, doc/reactor_backend_asymmetric_uring.md
+- **Sensor-in-Memory (SIM) shared-memory transport, He and Shi, arXiv 2510.11448** (rel 3, paper, unknown (no code link seen on the arXiv page)) https://arxiv.org/abs/2510.11448
+  - bottlenecks: P5
+  - Lock-free bounded double buffers that overwrite old data, with sequence numbers, a writer heartbeat and optional checksums. It argues freshness beats guaranteed delivery for sensor streams. Checksums and sequence numbers also point to a cheap state-hash tool for C13.
+  - speed claim: Claim (abstract page): up to 98% lower transport latency and about 95% lower mean latency than ROS 2 zero-copy (FastRTPS, Zenoh), on NVIDIA Jetson Orin Nano. Not independently reproduced.
+  - read: Section on transport design (double buffer, sequence number, heartbeat), Evaluation tables
+- **Sim-to-(Multi)-Real (Molchanov et al., arXiv 1903.04628) and What Matters in Learning a Zero-Shot Sim-to-Real RL Policy for Quadrotor Control (SimpleFlight, arXiv 2412.11764)** (rel 3, paper, n/a (papers)) https://arxiv.org/abs/1903.04628
+  - bottlenecks: C6, C14, C12
+  - The domain-randomization literature that says which quadrotor variables matter. Per search snippets: Molchanov randomizes motor time constant 0.1 to 0.2 s and thrust-to-weight 1.8 to 2.5 with first-order motor lag; SimpleFlight ablates domain randomization among five factors. Use as the priority order for the variable catalog. Their ablation rankings were not read; another agent should open the tables. Also from snippets: Quadrotor Morpho-Transition (arXiv 2506.14039) randomizes motor time constant 0.10-0.20 s and thrust and moment constants by 20 percent and reports no transfer without it; MuJoCo-Drones-Gym (arXiv 2606.08039) suggests thrust and torque x[0.85,1.15], motor lag 5-50 ms, action latency 0-50 ms (the paper's own claim that these are the largest unmodelled effects).
+  - speed claim: none
+  - read: 1903.04628 parameter table and ablation section, 2412.11764 domain randomization ablation, 2606.08039 recommended randomization ranges
+- **SimBricks paper** (rel 3, paper, ) https://arxiv.org/abs/2012.14219
+  - bottlenecks: P1, P5
+  - Formal description of the pairwise sync protocol and its liveness (SYNC messages) argument. Cheap to read before the code.
+  - speed claim: none
+  - read: Sync protocol section and Figure 5
+- **Simon Byrne, Beware of fast-math** (rel 3, write-up, blog) https://simonbyrne.github.io/notes/fastmath/
+  - bottlenecks: P7, C13
+  - Explains how -ffast-math reassociates sums, assumes no NaN/Inf, and flushes denormals (the -funsafe-math-optimizations flag-setting side effect can change results even in code compiled without it). For SIH this is the argument against -ffast-math in the physics TU: golden traces and state hashes (C13) would break across compiler versions. Safe alternative: targeted flags such as -fno-math-errno and explicit FMA decisions.
+  - speed claim: none
+  - read: sections on associativity, denormals, flag side effects
+- **Simulink Fast Restart (documentation only)** (rel 3, write-up, Proprietary; concept only) https://www.mathworks.com/help/simulink/ug/how-fast-restart-improves-iterative-simulations.html
+  - bottlenecks: P4, C10
+  - Compile once, then reinitialize between runs without terminating. Tunable inputs, initial state and run-time parameters may change; sample times and structure may not. Same split SIH needs for boot-to-ready: keep the process warm, reset state, and re-apply a parameter set.
+  - speed claim: The page gives no speed figure; it says only that it helps when compile 'takes several seconds or longer'.
+  - read: the page above, sections on allowed and disallowed changes
+- **Skarupke: Measuring Mutexes, Spinlocks and how bad the Linux scheduler really is** (rel 3, write-up, blog; benchmark repo skarupke/mutex_benchmarks has no license (idea only)) https://probablydance.com/2019/12/30/measuring-mutexes-spinlocks-and-how-bad-the-linux-scheduler-really-is/
+  - bottlenecks: P1, P2
+  - Warns what happens to pure spinning when threads outnumber cores (our 16-core box running a flight stack plus MAVLink threads plus many parallel runs for P6). Measures yield every 16 spins as a fix, and gives a benchmark harness. Linus Torvalds publicly disputed the conclusions, so treat as a caution and re-measure.
+  - speed claim: AMD Ryzen 7 1700, 16 threads, default Linux CFS: std::mutex 62 ms average and 2.9 ms longest wait versus naive spinlock 825 ms and 103.5 ms; yield() costs about 130 ns on his machine; a yield every 16 spins cut the spinlock's worst wait from 62.3 ms to 11.4 ms.
+  - read: the article, sections on the spinlock with yield and the scheduler comparison, github.com/skarupke/mutex_benchmarks
+- **Small Steps in Physics Simulation (Macklin et al., SCA 2019)** (rel 3, paper, paper) https://diglib.eg.org/handle/10.1145/3309486-3340247
+  - bottlenecks: P7, C14
+  - Argues n small steps with one iteration beat one large step with n iterations. Relevant to the question of integrator accuracy against step size in SIH and to substepping a fast inner loop under a slow outer one.
+  - speed claim: none
+  - read: Abstract and Section 'Substepping vs iterations'
+- **SnapFuzz (srg-imperial/SnapFuzz)** (rel 3, tool, MIT (attribution allowed)) https://github.com/srg-imperial/SnapFuzz
+  - bottlenecks: P4, P6, P5
+  - Snapshot at the latest safe point, plus redirect file operations to a custom in-memory filesystem, turn asynchronous network into synchronous calls, and remove sleeps/timeouts. The same three moves (in-memory fs for param/log files, no wall-clock waits, no /tmp lock files) address P6 and parts of P2/P5 in SIH.
+  - speed claim: Paper abstract claim (arXiv 2201.04048): speedups of 62.8x, 41.2x, 30.6x, 24.6x, 8.4x on LightFTP, TinyDTLS, Dnsmasq, LIVE555, Dcmqrscp versus AFLNet. Hardware not read.
+  - read: repo README, arXiv 2201.04048 sections on in-memory filesystem and sleep removal
+- **Stage (rtv/Stage)** (rel 3, simulator, GPL-2.0. Reimplement the idea only.) https://github.com/rtv/Stage
+  - bottlenecks: P5, P3
+  - Per-model update intervals scheduled through a priority-queue event queue (ConsumeQueue). Models run only when due, so multirate work costs nothing on ticks where it is not due. The same idea would let SIH sensors with different rates avoid per-tick work.
+  - speed claim: none
+  - read: libstage/world.cc: World::Update (about line 605), World::ConsumeQueue (about line 579), interval_sim handling (about line 413)
+- **Strongly-Consistent Distributed Discrete-event Systems (zero-delay cycles in Lingua Franca)** (rel 3, paper, ) https://arxiv.org/abs/2405.12117
+  - bottlenecks: P1, C14
+  - States that a cycle needs at least one logical delay in the prior art, and shows how to allow zero-delay cycles. This is the theory of what a feedback loop (flight stack to physics to flight stack) costs: one tick of logical delay, or a handshake.
+  - speed claim: none
+  - read: Abstract and the section on the logical-delay requirement for cycles
+- **Sveier, Sjoberg, Egeland: Applied Runge-Kutta-Munthe-Kaas Integration for the Quaternion Kinematics** (rel 3, paper, paper) https://ntnuopen.ntnu.no/ntnu-xmlui/handle/11250/2638766?show=full
+  - bottlenecks: P7, C14
+  - This is SIH reference [3]. The record exists, but I could not open the abstract or body (the repository redirects to a JavaScript page, Semantic Scholar returned 429, arXiv API returned nothing), so I cannot state its recommendation. Given SIH already uses an exact exponential-map increment for the attitude, the likely gain is limited to higher-order coupling with the angular velocity update. Another agent should read the PDF.
+  - speed claim: none
+  - read: abstract, comparison tables of RKMK orders versus cost, the quaternion-kinematics section
+- **Sveier, Sjoberg, Egeland: Applied Runge-Kutta-Munthe-Kaas Integration for the Quaternion Kinematics (JGCD 2019, SIH reference [3])** (rel 3, paper, paper, journal copyright) https://doi.org/10.2514/1.G004578
+  - bottlenecks: P7
+  - The paper SIH cites. Geometric (Lie group) integration keeps the unit norm without renormalisation. Search snippet says fourth-order Crouch-Grossman is more accurate than its Runge-Kutta counterpart. I could not open the full text (publisher page and the NTNU repository redirected to a JavaScript page; Semantic Scholar rate limited), so the recommendation for step size or method is NOT confirmed. Read it fully before changing SIH's dq=AxisAngle(w*dt) update, which is already an exponential-map step.
+  - speed claim: none
+  - read: Abstract and numerical comparison tables on the AIAA page, Section on RKMK order 4 and Crouch-Grossman schemes
+- **Swarm testing (Groce et al., ISSTA 2012)** (rel 3, paper, paper) https://doi.org/10.1145/2338965.2336763
+  - bottlenecks: C12, C11
+  - Each random test randomly omits a subset of features, which raises diversity versus using all features every time. For SIH: each run randomly enables a subset of disturbances (wind, noise, failure, mass change) instead of all or none. Crossref confirmed; ACM page returned 403.
+  - speed claim: none
+  - read: paper (ACM DOI 10.1145/2338965.2336763)
+- **Swarm testing (Groce, Zhang, Eide, Chen, Regehr, ISSTA 2012)** (rel 3, paper, Paper) https://www.cs.utah.edu/~regehr/papers/swarm12.pdf
+  - bottlenecks: C12, C11
+  - Each run randomly enables a subset of features instead of all; shown to find bugs a uniform random configuration misses. TigerBeetle's options_swarm applies this. For SIH: per seed, randomly choose which disturbances (wind gusts, motor loss, GPS dropout) are active. PDF URL returned 200; I did not read it.
+  - speed claim: none
+  - read: abstract and evaluation sections
+- **SymForce** (rel 3, tool, Apache-2.0) https://github.com/symforce-org/symforce
+  - bottlenecks: P7, P5
+  - Symbolic derivation then generation of flat templated C++ with no runtime algebra. For SIH, a way to generate the rigid-body, rotor and aero equations (including N-rotor and CG offset) as straight-line code that fits flash and is checked against a Python reference.
+  - speed claim: none
+  - read: symforce/codegen/ (cpp templates), paper https://ar5iv.arxiv.org/html/2204.07889
+- **SystemC TLM-2.0 temporal decoupling (tlm_quantumkeeper)** (rel 3, library, Apache-2.0; adaptable with attribution) https://github.com/accellera-official/systemc
+  - bottlenecks: P1, P5, C14
+  - A model lets its local time run ahead of the kernel by up to a global quantum before it must synchronize. In SIH terms, sensors or the physics could run several steps ahead of the flight stack within a bounded quantum, removing one handshake per step, at the cost of timing error bounded by the quantum. Pattern only; needs a decision about integrity at default settings.
+  - speed claim: none
+  - read: src/tlm_utils/tlm_quantumkeeper.h, src/tlm_core/tlm_2/tlm_quantum/tlm_global_quantum.h, .cpp
+- **Triple buffer (HadrienG2/triple-buffer and spmc-buffer)** (rel 3, library, MPL-2.0 (file-level copyleft: reimplement the idea, do not copy text into BSD files)) https://github.com/HadrienG2/triple-buffer
+  - bottlenecks: P5
+  - Wait-free latest-value hand-off between one writer and one reader using three buffers and one atomic swap; spmc-buffer extends it to several readers. This is the textbook structure for uORB depth-1 'last value wins' topics: no lock, no callback walk, bounded memory (3 x sizeof).
+  - speed claim: none
+  - read: src/lib.rs (module docs explain the algorithm), HadrienG2/spmc-buffer for the multi-reader variant
+- **Turmoil (tokio-rs) host simulation with seeded network** (rel 3, library, MIT) https://github.com/tokio-rs/turmoil
+  - bottlenecks: C14, C11, C1
+  - Many hosts in one thread, a simulation clock stepped by tick duration, seeded RNG for latency and drops, and explicit hold/partition/repair controls by name and time. Shape for an SIH scenario layer (sensor latency, link breakage at time t) without any real I/O.
+  - speed claim: none
+  - read: crates/turmoil/src/sim.rs, crates/turmoil/src/rt.rs, crates/turmoil/src/net/
+- **UMCG (user-managed concurrency groups): Oskolkov RFC 2021 and Zijlstra reimplementation (LWN overview)** (rel 3, write-up, GPL-2.0 (kernel). Reimplement the idea only.) https://lwn.net/Articles/879398/
+  - bottlenecks: P5, P1
+  - Syscalls umcg_ctl, umcg_wait and umcg_kick give a user-space scheduler that switches a worker in directly. The SIH thread would act as the 'server' and flight-stack workers as 'workers'. It is not merged and needs a custom kernel, so use it for the vocabulary and the run-to-completion model: one runner, with waiters switched in and out instead of sleeping on futexes.
+  - speed claim: The LWN article has no benchmark numbers (checked). The seed's figures (remote futex wake on an idle CPU 5-10 us, on-CPU UMCG switch under 1 us, same-CPU futex wake+wait 1-1.5 us) are the author's, hardware unstated, and I could not verify them: lore.kernel.org returned HTTP 403 and the web search budget ran out.
+  - read: LWN article 'User-managed concurrency groups' (Dec 28 2021): sections on umcg_wait and umcg_kick, LKML RFC v0.1 cover letter, May 2021: not reached, lore blocked, Zijlstra's tip/sched/umcg branch: not located
+- **Unbiased Deterministic Total Ordering of Parallel Simulations with Simultaneous Events** (rel 3, paper, ) https://arxiv.org/abs/2105.00069
+  - bottlenecks: C1, C13, P5
+  - Addresses the exact problem in C1: events at the same simulated time arriving in thread-dependent order, giving different runs. Proposes ordering that is deterministic and unbiased. Title verified; content not read.
+  - speed claim: none
+  - read: abstract and method section
+- **Varghese and Lauck, Hashed and Hierarchical Timing Wheels (SOSP 1987)** (rel 3, paper, Paper, algorithm free to reimplement) https://doi.org/10.1145/41457.37504
+  - bottlenecks: P5
+  - The original algorithms: scheme 4 (basic wheel), 5 (hashed, sorted buckets), 6 (hashed, unsorted buckets with round counter), 7 (hierarchical). The DOI resolves in Crossref. The paper is the right source for choosing parameters (wheel size vs per-tick work). The algorithm is free to reimplement.
+  - speed claim: none
+  - read: Section on schemes 5, 6 and 7 and their per-tick bookkeeping cost analysis
+- **WF_CURRENT_CPU and wake_up_poll_on_current_cpu (in-tree since v6.6)** (rel 3, source-file, GPL-2.0 (kernel). Idea only.) https://github.com/torvalds/linux/blob/v6.6/kernel/sched/wait.c
+  - bottlenecks: P5, P1
+  - A stronger placement hint than WF_SYNC: select_task_rq_fair() returns the waker's CPU outright if the wakee's cpus_ptr allows it. It is merged, but I found no futex or userspace API that sets it. Which in-tree callers use it is not checked. Read it to see what a future futex flag would do, and to learn which kernel versions have it.
+  - speed claim: none
+  - read: kernel/sched/wait.c __wake_up_on_current_cpu() ~line 164, kernel/sched/fair.c select_task_rq_fair() lines ~7940-7946 (WF_TTWU and WF_CURRENT_CPU branch), include/linux/wait.h lines 213 and 241-242
+- **WSL2 kernel config (microsoft/WSL2-Linux-Kernel, linux-msft-wsl-6.18.y) and .wslconfig levers** (rel 3, source-file, GPL-2.0 (kernel config)) https://github.com/microsoft/WSL2-Linux-Kernel/blob/linux-msft-wsl-6.18.y/arch/x86/configs/config-wsl
+  - bottlenecks: P5, P1, P2
+  - Facts about the environment the numbers came from. In that config: CONFIG_PREEMPT_NONE=y with PREEMPT_DYNAMIC, CONFIG_HZ=250, NO_HZ_IDLE (NO_HZ_FULL not set), CONFIG_SCHED_CLASS_EXT not set, CONFIG_SCHED_CORE not set, CONFIG_CPUSETS=y, CONFIG_PARAVIRT=y with PARAVIRT_SPINLOCKS, PARAVIRT_TIME_ACCOUNTING not set, NUMA=y, SCHED_SMT=y. The 6.18 config is the newest branch; which kernel the measured machine runs was not checked (uname -r would say). .wslconfig [wsl2] offers processors=N (default: all Windows logical processors), kernel=<custom path> and kernelCommandLine, so vCPU count and kernel boot parameters can be changed without building anything.
+  - speed claim: none
+  - read: arch/x86/configs/config-wsl (Microsoft/config-wsl is a one-line redirect to it), https://learn.microsoft.com/en-us/windows/wsl/wsl-config section '.wslconfig' [wsl2]: processors, kernel, kernelCommandLine
+- **WebKit ParkingLot, WordLock, Lock (Locking in WebKit)** (rel 3, write-up, Blog text unspecified. WebKit sources are BSD-2-Clause (from memory; GitHub reports no license field for the repo).) https://webkit.org/blog/6161/locking-in-webkit/
+  - bottlenecks: P1, P5
+  - Design write-up of a one-byte lock plus condition built on a parking lot keyed by address, with a spin-then-park policy (a search summary said 40 spins with a yield each; not verified by me). Source is in WTF. The mechanism that lets a waiter wait on any word and be woken by address could replace per-waiter pthread_cond objects in the lockstep scheduler.
+  - speed claim: Claim in the blog, not verified by me: WTF::Lock is smaller and faster than pthread_mutex.
+  - read: blog post sections on spinning policy, ParkingLot and WordLock, Source/WTF/wtf/ParkingLot.cpp, Lock.cpp, WordLock.cpp
+- **Webots GPS noise: WbGps AR(1) correlated noise, resolution quantization, speed noise** (rel 3, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/nodes/WbGps.cpp
+  - bottlenecks: C3
+  - Position noise is a first-order Gauss-Markov process, noise = r*noise + sqrt(1-r^2)*N(0,1), scaled by accuracy (noiseCorrelation field), then quantized by resolution. A compact, constant-memory correlated-noise model that fits a flash-limited sensor model. Caveat: noise[3] is a function-static, so it is shared between all GPS devices, which is a hazard to avoid in a lift.
+  - speed claim: none
+  - read: WbGps.cpp ~lines 260-335 (noise[i] = ratio*noise[i] + sqrt(1-ratio^2)*nextGaussian, resolution, speedNoise), docs/reference/gps.md
+- **Webots Propeller thrust and torque model: WbPropeller::prePhysicsStep** (rel 3, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/nodes/WbPropeller.cpp
+  - bottlenecks: C6, C7
+  - Per-propeller thrust = a*w*|w| - b*|w|*V and torque = c*w*|w| - d*|w|*V, where V is the airflow speed along the shaft taken from the body point velocity at a per-propeller centre of thrust; torque is clamped to the motor's maxForceOrTorque; each propeller carries its own constants, axis and position. This gives per-rotor parameters, an advance-velocity term and an N-rotor generic layout in about 50 lines, with forces applied through a per-step accumulator. A direct pattern for C6 and C7.
+  - speed claim: none
+  - read: WbPropeller::prePhysicsStep (~200-262), docs/reference/propeller.md
+- **Webots RNG and seeding: WbRandom, WorldInfo.randomSeed, optimalThreadCount docs** (rel 3, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/maths/WbRandom.cpp
+  - bottlenecks: C1, C13
+  - A tiny global Marsaglia multiply-with-carry generator (two 32-bit words) plus a Marsaglia polar Gaussian, seeded from WorldInfo.randomSeed (-1 means time and pid, so non-reproducible) and reseeded on every reset. The docs say 'using more than 1 thread can result in non replicable simulations', and the generator is one global stream, so draw order depends on call order. Takeaways: it is cheap and code-size tiny (suits flash-limited boards), the seed is a first-class world field, and the single stream is what NOT to copy: SIH should give each noise source its own stream derived from (seed, source id). Also a ready-made statement of the replicability trade-off for threading.
+  - speed claim: none
+  - read: WbRandom.cpp nextUInt / nextGaussian / setSeed, WbSimulationWorld::updateRandomSeed (~342), docs/reference/worldinfo.md: randomSeed (line ~133) and optimalThreadCount (~75-80)
+- **Webots WbLookupTable: input-dependent response and noise table** (rel 3, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/nodes/WbLookupTable.cpp
+  - bottlenecks: C2, C3
+  - Sensor transfer curves are piecewise-linear tables of (input, output, noise-fraction); lookup() interpolates both the output and the noise level, then adds Gaussian noise. One generic mechanism expresses range-sensor nonlinearity, gain curves and input-dependent noise as data, which could be reused for baro, airspeed and temperature curves without code changes.
+  - speed claim: none
+  - read: WbLookupTable::lookup (lines ~66-110), docs/reference/distancesensor.md (lookupTable section)
+- **Webots WbPerformanceLog and --log-performance** (rel 3, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/util/WbPerformanceLog.cpp
+  - bottlenecks: P5, C13
+  - A built-in per-step profiler: startMeasure/stopMeasure around prePhysics, physics, postPhysics and each controller (labelled per controller), written as a table with 'Average speed factor: Nx' and thread count, and limited to the first N steps. A SIH equivalent (per-phase and per-module wall time per tick, plus a real-time-factor line) would let the lockstep wait and wake costs be attributed without perf. It would also give every flight a comparable record.
+  - speed claim: none
+  - read: WbPerformanceLog.cpp: gInfoLabels (~75), the average speed factor computation (~176), per-controller columns (~199), WbSimulationWorld::step: log->startMeasure / stopMeasure calls, docs/guide/starting-webots.md: --log-performance=<file>[,<steps>]
+- **Webots WorldInfo randomSeed and optimalThreadCount** (rel 3, simulator, Apache-2.0) https://github.com/cyberbotics/webots/blob/master/docs/reference/worldinfo.md
+  - bottlenecks: C1, P6
+  - Documents a design to mirror: world-file randomSeed >= 0 gives repeatable sensor noise, -1 uses a time-based seed; plus a clear statement that more than 1 physics thread 'can result in non replicable simulations'. Shows how a mature simulator exposes the seed and the determinism trade-off as one world-level field.
+  - speed claim: none
+  - read: docs/reference/worldinfo.md lines ~73-80 (optimalThreadCount) and ~133-136 (randomSeed), src/webots/ for WbRandom and WbWorldInfo (not located)
+- **Webots WorldInfo randomSeed and optimalThreadCount** (rel 3, simulator, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/docs/reference/worldinfo.md
+  - bottlenecks: C1, P5, P6
+  - A simulator that exposes the seed as a world field. Quote from docs: randomSeed 'defines the seed of the internal random number generator used by Webots' and affects sensor noise patterns, -1 means a time-based seed and 'makes simulations non-reproducible'. optimalThreadCount: 'using more than 1 thread can result in non replicable simulations'. Shows the user-facing contract that SIH could expose.
+  - speed claim: none
+  - read: docs/reference/worldinfo.md lines ~14, 26, 75-80, 133-136
+- **Webots command line and multi-instance ports: --port, --mode, --batch, --no-rendering, --heartbeat; extern controller --port/--robot-name** (rel 3, write-up, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/docs/guide/starting-webots.md
+  - bottlenecks: P3, P6
+  - Instance isolation by one --port per instance (default 1234), with the extern controller selecting an instance with --port and a robot with --robot-name (docs/guide/running-extern-robot-controllers.md); IPC sockets live under a per-instance WEBOTS_INSTANCE_PATH. Model for a single --instance N (or PX4 SIH_INSTANCE) that derives every port, lock file and tmp path from one number, which is what P6 needs. Also --heartbeat (progress dots) and --batch (no blocking dialogs).
+  - speed claim: none
+  - read: docs/guide/starting-webots.md options list (lines ~40-90), docs/guide/running-extern-robot-controllers.md 'Multiple Concurrent Simulations' sections (~137-153), src/controller/c/robot.c compute_socket_filename (~1144)
+- **Webots robot step API (wb_robot_step, split wb_robot_step_begin and wb_robot_step_end, synchronization flag)** (rel 3, simulator, Apache-2.0) https://github.com/cyberbotics/webots/blob/master/src/controller/c/robot.c
+  - bottlenecks: P1, P5, C11
+  - Controller-side lockstep: wb_robot_step(duration) is a blocking handshake; the begin/end split lets the controller overlap its own work with the simulator step, which is the same idea as letting the stack compute while physics advances. A per-robot 'synchronization' flag lets some controllers run unsynchronized. Supervisor API changes anything at a time or trigger (C11). I did not verify the fast-mode run speed.
+  - speed claim: none
+  - read: src/controller/c/robot.c: robot_step_begin (line ~900), robot_step_end (~946), wb_robot_step (~994), src/webots/control/WbController.cpp, src/webots/core/WbSimulationState.cpp
+- **Wizer (WebAssembly pre-initializer)** (rel 3, tool, Apache-2.0 (with LLVM exception) (adapt with attribution)) https://github.com/bytecodealliance/wizer
+  - bottlenecks: P4
+  - Runs an init function once, snapshots the result into the module, and every instance starts post-init. Its restrictions are the lesson: init may not call imported (I/O) functions, so snapshot state stays deterministic. For SIH: run a pure deterministic 'init to convergence' phase with no sockets or clocks, then snapshot.
+  - speed claim: Claim (README table): UAP 98.297 ms without Wizer vs 16.385 ms with, 6.00x faster; regex 248.85 us vs 183.99 us, 1.35x; hardware not stated in the README.
+  - read: README.md (table, restrictions), src/lib.rs (snapshotting of globals/memories)
+- **Yeager NASA CR-1998-206937 Implementation and Testing of Turbulence Models for the F18-HARV (basis of JSBSim Tustin turbulence)** (rel 3, paper, NASA report (public); JSBSim code LGPL-2.1) https://jsbsim-team.github.io/jsbsim/classJSBSim_1_1FGWinds.html
+  - bottlenecks: C4, C14
+  - Discrete-time (Tustin) Dryden filters give a turbulence generator that is step-size aware, so it can run at the SIH step with fixed state. The JSBSim comment notes that rounded coefficients make Tustin filters drift, which matters for fixed 4 ms steps. Only the JSBSim docs page was opened; the report itself was not fetched, so its existence is taken from the docs citation.
+  - speed claim: none
+  - read: JSBSim FGWinds.cpp, ttTustin branch (about lines 316-350), MIL-F-8785C Figs 7, 10, 11 cited in the same file for scale lengths and intensities
+- **Zephyr zbus** (rel 3, library, Apache-2.0 (adaptable with attribution)) https://github.com/zephyrproject-rtos/zephyr
+  - bottlenecks: P5
+  - The MCU-native pub/sub bus: static channels with observer types (listener = synchronous callback in the publisher context, subscriber = queue + thread, message subscriber = queued copy). Flash and RAM per observer are measured by its own benchmark sample, which is the kind of budget evidence needed for the 54 flash-limited boards. The 'listener' (run inline, zero queue) versus 'subscriber' split mirrors choices SIH could make per consumer.
+  - speed claim: Sample CSV from the benchmark README on board nrf52dk/nrf52832 for sending 256KB: 'LISTENERS,8,512,4862.0,10780,23742' versus 'SUBSCRIBERS,8,512,23905.0,19804,25398' (columns: observer type, consumers, message bytes, duration ns as labelled, RAM bytes, ROM bytes). The README's unit labelling is ambiguous, treat as relative only. Source: samples/subsys/zbus/benchmark/README.rst.
+  - read: subsys/zbus/zbus.c, subsys/zbus/zbus_private.h, samples/subsys/zbus/benchmark/README.rst, doc/services/zbus/index.rst
+- **Zephyr zbus (and the NuttX port)** (rel 3, library, Apache-2.0 per the NuttX docs page (adaptable with attribution)) https://docs.zephyrproject.org/latest/services/zbus/index.html
+  - bottlenecks: P5, C10
+  - A bus built for microcontrollers: channels defined at compile time, with listeners (synchronous callbacks on publish) and subscribers (async notify, then read), a fixed delivery order, and observers that can be enabled or disabled at runtime. The fixed order is a model for deterministic delivery; the enable switch is a model for live change (C10). NuttX is PX4's embedded OS, so a port exists to compare against.
+  - speed claim: none
+  - read: Zephyr docs services/zbus/index (delivery order section), https://nuttx.apache.org/docs/latest/applications/system/zbus/index.html (NuttX port and missing features)
+- **ZeroMQ libzmq (ypipe, yqueue, signaler, mailbox)** (rel 3, library, MPL-2.0 (file-level copyleft; reimplement the idea)) https://github.com/ZeroMQ/libzmq
+  - bottlenecks: P5, P1
+  - ypipe is a lock-free single-writer pipe with a check_read plus flush that batches wakeups: the writer only signals when the reader has gone to sleep. signaler.cpp wraps eventfd. The 'only wake a sleeping consumer' trick directly reduces per-publish wake syscalls.
+  - speed claim: none
+  - read: src/ypipe.hpp, src/yqueue.hpp, src/signaler.cpp, src/mailbox.cpp
+- **abseil Mutex spin policy and futex Waiter** (rel 3, library, Apache-2.0) https://github.com/abseil/abseil-cpp/tree/master/absl/synchronization
+  - bottlenecks: P1, P5
+  - Production spin-then-futex logic: Mutex spins up to 1500 iterations on multiprocessors and none on a uniprocessor (decided at first contended call), then parks on a per-thread semaphore built on futex with absolute-time KernelTimeout. Pattern for a CPU-count-aware spin budget, which matters because SIH runs on 54 boards with different core counts. Notification is a simple one-shot event.
+  - speed claim: none
+  - read: absl/synchronization/mutex.cc: ~line 1895 spinloop_iterations init, TryAcquireWithSpinning, absl/synchronization/internal/futex_waiter.cc, absl/synchronization/internal/kernel_timeout.h, absl/synchronization/notification.h, absl/base/internal/spinlock.cc and spinlock_wait.cc
+- **adevs (smiz/adevs): DEVS with hybrid solvers and event locators** (rel 3, library, BSD-2-Clause. GitHub SPDX shows NOASSERTION, but copyright.txt at HEAD is the 2-clause BSD text. The Fedora LGPL claim for 2.8.1 was not checked against the tarball.) https://github.com/smiz/adevs
+  - bottlenecks: C10, C11, P7, C14
+  - Gives exact-time state events: hybrid.h with event_locators.h finds a zero crossing inside a step, and sd_time (super-dense time) orders simultaneous events by an integer microstep. Directly relevant to 'apply a change at an exact simulated time' and to an integrator that does not drift with step size (rk_45.h, corrected_euler.h, trap.h). Too heavy to embed; read it for the event-location algorithm.
+  - speed claim: none
+  - read: include/adevs/solvers/hybrid.h, include/adevs/solvers/event_locators.h, include/adevs/solvers/rk_45.h and corrected_euler.h, include/adevs/time.h (sd_time), include/adevs/sched.h and schedule2.h (event queues), copyright.txt
+- **adrian-mason/wperf - wPerf reimplementation in Rust** (rel 3, tool, none declared (GitHub API license is null; treat as no license)) https://github.com/adrian-mason/wperf
+  - bottlenecks: P5
+  - A 2026 Rust reimplementation of the wPerf thread-level wait-for graph profiler. It may be a more current, buildable route to the same analysis than the 2020 original. I did not read the code, so quality and maturity are unknown.
+  - speed claim: none
+  - read: README (check which kernel events it needs and whether it works on WSL2)
+- **aerial-autonomy-stack paper (arXiv 2602.07264) and repo** (rel 3, paper, repo JacopoPan/aerial-autonomy-stack is MIT) https://arxiv.org/abs/2602.07264
+  - bottlenecks: P3, P5, P6
+  - The only measured speed table for PX4 and ArduPilot SITL in lockstep with Gazebo. Shows that two parallel instances raise aggregate speed-up, that physics RTF is capped at 15x to avoid jitter and SITL instability, and that ArduPilot step was raised 1 ms to 2 ms. This gives a comparison baseline for our 9-12x and 100x results, and the 'cap requested speed below what the stack can sustain' lesson for P3.
+  - speed claim: Table II, mobile workstation Intel Core i9-13th gen, 64 GB RAM, RTX 3500 Ada; mean of 10 runs of 250 simulated seconds; Gazebo plus SITL, no sensors: PX4 1 drone 10.56x; PX4 two instances 1 drone each 26.05x total; ArduPilot 1 drone 8.35x; ArduPilot two instances 15.06x. Source: https://arxiv.org/html/2602.07264v1
+  - read: Section on faster-than-real-time simulation and Table II, repo: Gazebo world SDF, clock bridge config
+- **awesome-deterministic-simulation-testing** (rel 3, write-up, CC-BY-4.0) https://github.com/ivanyu/awesome-deterministic-simulation-testing
+  - bottlenecks: C1, C11, C13
+  - Index of DST resources (Will Wilson FDB talk, BUGGIFY, TigerBeetle, Polar Signals mostly-DST in Go, RisingWave madsim series, Dropbox sync testing, Unthread, Tickloom). Starting list for the next depth pass.
+  - speed claim: none
+  - read: README.md Software and Case studies sections
+- **bcc libbpf-tools: futexctn, klockstat, offcputime, runqlat, cpudist, syscount** (rel 3, tool, futexctn.c header: LGPL-2.1 OR BSD-2-Clause (read); check each file) https://github.com/iovisor/bcc/tree/master/libbpf-tools
+  - bottlenecks: P5, P1, P2
+  - Single-purpose tools for the edges the wakeup graph does not cover: futexctn attributes futex contention, offcputime gives blocked time with stacks, runqlat gives run-queue latency, syscount counts syscalls such as futex and nanosleep per thread, klockstat gives lock hold times. Note that the lock wait is a wake edge only if the thread sleeps.
+  - speed claim: none
+  - read: libbpf-tools/futexctn.bpf.c (based on the SystemTap WSFutexContention script), libbpf-tools/syscount.bpf.c, libbpf-tools/offcputime.bpf.c, libbpf-tools/runqlat.bpf.c
+- **bpftrace tools (naptime.bt, threadsnoop.bt, runqlat.bt, syscount.bt)** (rel 3, tool, Apache-2.0 (naptime.bt says to keep its comment when copying)) https://github.com/bpftrace/bpftrace/tree/master/tools
+  - bottlenecks: P1, P2, P5
+  - bpftrace has no wakeup tool, but its one-line style can aggregate @[comm, args.comm] on tracepoint:sched:sched_waking in a few lines (my inference). naptime.bt traces voluntary nanosleep, which would count the usleep(100) actuator wait and the pacing usleeps per thread. The bpftrace tools list I opened had no wakeup or futex script.
+  - speed claim: none
+  - read: tools/naptime.bt (tracepoint:syscalls:sys_enter_clock_nanosleep and sys_enter_nanosleep), tools/runqlat.bt (sched_wakeup tracepoint use), tools/syscount.bt
+- **confseq (confidence sequences, anytime-valid bounds)** (rel 3, library, MIT) https://github.com/gostevehoward/confseq
+  - bottlenecks: C12
+  - Confidence sequences let a sweep stop as soon as a failure-rate or metric difference is established, without fixed sample sizes (sequential testing). A principled stop rule for Monte Carlo batches.
+  - speed claim: none
+  - read: src/confseq/ (betting and conjmix boundaries), README
+- **crossbeam-utils Backoff and Parker** (rel 3, library, Apache-2.0 or MIT (adaptable with attribution)) https://github.com/crossbeam-rs/crossbeam/blob/a28f40fdddb70bea8e5faf0efad9af0be4b9dbea/crossbeam-utils/src/backoff.rs
+  - bottlenecks: P1
+  - Smallest clear exponential spin-then-yield backoff (SPIN_LIMIT 6, YIELD_LIMIT 10, spin 2^step pause hints, then yield) with spin() versus snooze() and is_completed() telling the caller when to stop spinning and block. Easy port to a 30-line C++ struct.
+  - speed claim: none
+  - read: crossbeam-utils/src/backoff.rs: spin(), snooze(), is_completed(), crossbeam-utils/src/sync/parker.rs
+- **dm_control composer variation module** (rel 3, library, Apache-2.0) https://github.com/google-deepmind/dm_control/tree/main/dm_control/composer/variation
+  - bottlenecks: C12, C1, C2, C3
+  - A small composable algebra of Variation objects: distributions, noises (additive and multiplicative, for sensor noise), rotations, deterministic. A variation is a value that can be a constant or a callable of random_state, and Variations support arithmetic. This is a good design for SIH's variable catalogue: every parameter accepts either a number or a distribution, with one explicit RandomState per call site (C1). Observable module adds delay, corruption and buffering to sensors (C3, C14). Apache-2.0.
+  - speed claim: none
+  - read: dm_control/composer/variation/base.py, dm_control/composer/variation/distributions.py, dm_control/composer/variation/noises.py, dm_control/composer/observation/observable/base.py (delay, corruptor, buffer), dm_control/composer/environment.py (episode init order)
+- **dm_control composer variation module** (rel 3, library, Apache-2.0) https://github.com/google-deepmind/dm_control
+  - bottlenecks: C12, C1
+  - A Variation object is a callable that produces a value from a random state, and variations compose (distributions, noises, deterministic, math ops). Variations are attached to model attributes and re-sampled at episode start. Shows a minimal composable distribution language for per-variable randomization with a shared RandomState.
+  - speed claim: none
+  - read: dm_control/composer/variation/base.py, dm_control/composer/variation/distributions.py, dm_control/composer/variation/noises.py, dm_control/composer/environment.py (initialize_episode, random_state)
+- **dm_control composer: variation and episode hooks** (rel 3, library, Apache-2.0) https://github.com/google-deepmind/dm_control/tree/f9b2e9c304d3a07eb47dd82ade5b59735a368ff9/dm_control/composer
+  - bottlenecks: C1, C12, C7
+  - Composable Variation objects (distributions, noises, deterministic sequences, math ops) that are evaluated with an explicit random_state, plus ordered hooks (initialize_episode_mjcf, after_compile, initialize_episode, before_step, after_step). Idea to lift: every random draw takes an explicit seeded stream owned by its source, and parameters are described as expressions that can be sampled or swept (C1, C12).
+  - speed claim: none
+  - read: dm_control/composer/variation/base.py, distributions.py, noises.py, deterministic.py, math.py, dm_control/composer/environment.py _EnvironmentHooks (l.67-125, initialize_episode_mjcf and after_compile hooks), dm_control/composer/initializer.py
+- **eCAL shared-memory layer and benchmark suite** (rel 3, library, Apache-2.0 (adaptable with attribution)) https://github.com/eclipse-ecal/ecal
+  - bottlenecks: P5, C13
+  - Two things. First, memfile modes (plain, zero-copy, handshake, double-buffer) as alternatives for a writer/reader pair. Second, and the one to copy for C13: a Google Benchmark suite that runs on every master commit and posts results to Bencher for regression flagging. That is a working model for a 'did a change slow or alter SIH' CI gate.
+  - speed claim: No figures found; results sit on Bencher (https://bencher.dev/console/projects/ecal/plots), which I did not open.
+  - read: doc/rst/advanced/benchmarks.rst (benchmark list: Send, Send_and_Receive, Receive_Latency, zero-copy, handshake, double-buffer variants at 1 B to 16 MiB), ecal/core/src/io/shm/ecal_memfile_sync.cpp and ecal_memfile_db.cpp, ecal/core/src/readwrite/shm/ecal_writer_shm.cpp and ecal_reader_shm.cpp
+- **ecef-geodetic test suite** (rel 3, tool, not shown by API (check repo before copying)) https://github.com/planet36/ecef-geodetic
+  - bottlenecks: P7
+  - Accuracy and speed harness comparing ECEF to geodetic implementations; usable as the reference when swapping the SIH conversion.
+  - speed claim: none
+  - read: README speed and accuracy plots, implementation sources per algorithm
+- **folly HHWheelTimer** (rel 3, library, Apache-2.0) https://github.com/facebook/folly/blob/main/folly/io/async/HHWheelTimer.cpp
+  - bottlenecks: P5
+  - 4-level hashed hierarchical wheel with a bitmap of non-empty buckets and explicit cascade; it also schedules its own wakeup only for the nearest occupied bucket (scheduleNextTimeout) and has a guard for callbacks that add timers while expiring. That re-entrancy case matters in SIH because a woken work item can re-arm a wait while the clock is being set. Apache-2.0.
+  - speed claim: none
+  - read: folly/io/async/HHWheelTimer.cpp: scheduleTimeout(), cascadeTimers(), timeoutExpired(), scheduleNextTimeout(), HHWheelTimer.h: WHEEL_BITS/WHEEL_SIZE constants, bitmap_
+- **folly LifoSem, EventCount, ParkingLot** (rel 3, library, Apache-2.0) https://github.com/facebook/folly/blob/04ede62dd3e12dbb89ad6ff0681defa41e3b8f38/folly/synchronization/LifoSem.h
+  - bottlenecks: P5, P6
+  - LifoSem wakes the most recently parked waiter (warm cache, and spare threads stay asleep). That is useful if parallel runs or several waiters share a host. EventCount is the standard 'wait for a condition without a lost wakeup and without signalling when nobody waits' primitive, which maps to the lockstep scheduler broadcasting to every waiter on every time step. ParkingLot is a hash-table of waiters keyed by address, the user-space futex.
+  - speed claim: none
+  - read: folly/synchronization/LifoSem.h (LifoSemBase::post, wait, tryWait, shutdown), folly/synchronization/EventCount.h (prepareWait, wait, cancelWait, notify), folly/synchronization/ParkingLot.h and ParkingLot.cpp
+- **generate_parameter_library (ros-tooling)** (rel 3, tool, BSD-3-Clause) https://github.com/ros-tooling/generate_parameter_library
+  - bottlenecks: C12, C10
+  - Generates a C++ struct, validators and update code from a YAML parameter file, with runtime-updatable flags and range validators. PX4 already keeps parameters in YAML (sih_params.yaml), so the same idea could generate the catalogue of all SIH variables with limits and a runtime-changeable flag. The generator is Python/Jinja, and the output has no runtime dependency. BSD-3.
+  - speed claim: none
+  - read: generate_parameter_library_py/generate_parameter_library_py/generate_cpp_header.py, generate_parameter_library_py/generate_parameter_library_py/jinja_templates/cpp/ (declare_struct, declare_runtime_parameter, parameter_library_header), example/test/test_params_consistency.cpp
+- **hitl-sensors (Rust sensor noise models for HITL: IMU, GPS, baro, mag)** (rel 3, library, none stated (idea only)) https://github.com/antonpogrebenko-public/hitl-sensors
+  - bottlenecks: C1, C2, C3, P5
+  - A very new, tiny library with Gauss-Markov bias/drift for IMU, GPS and others, seeded constructors, and criterion benches framed against a 2500 us tick budget at 400 Hz. Its noise.rs caches the second Box-Muller deviate (NormalSource) and says honestly that this changes the random stream, a useful per-step cost trick and a good example of declaring a determinism break. No figures were found in the files read, and the repo has 0 stars and no license, so treat as a pattern only.
+  - speed claim: none
+  - read: src/noise.rs (NormalSource doc comment, GaussMarkov), src/imu.rs (ImuConfig, with_config_and_seed, sample), benches/sample.rs (header comment about the tick budget)
+- **libc++ atomic wait (__thread/poll_with_backoff.h, src/atomic.cpp)** (rel 3, source-file, Apache-2.0 with LLVM exceptions) https://github.com/llvm/llvm-project/blob/main/libcxx/include/__thread/poll_with_backoff.h
+  - bottlenecks: P1, P2
+  - Generic poll_with_backoff(poll, backoff, max_elapsed) with __libcpp_polling_count = 64 before a time-based backoff policy; clean decomposition of 'poll predicate' vs 'backoff policy' that can be a template for SIH's wait loop.
+  - speed claim: none
+  - read: libcxx/include/__thread/poll_with_backoff.h, libcxx/src/atomic.cpp, libcxx/include/__atomic/atomic_sync.h
+- **libc++ atomic wait/notify implementation (contention table)** (rel 3, source-file, Apache-2.0 with LLVM exceptions) https://github.com/llvm/llvm-project/blob/main/libcxx/src/atomic.cpp
+  - bottlenecks: P1, P5
+  - Reference implementation of C++20 std::atomic::wait: a 256-entry, cache-line-aligned table indexed by hashed address, with a futex wait on Linux and __ulock_wait on macOS, and a global-table path for atomics that are not futex-sized. Shows how to avoid a waiter list per object and avoid a syscall when nobody waits (contention count). Directly usable if PX4 gets C++20 toolchains; otherwise a pattern.
+  - speed claim: No figure. A July 2026 patch (PR #208493) proposes merging the two contention tables; its merged status was not confirmed. Search-snippet detail, not fully read.
+  - read: libcxx/src/atomic.cpp (__libcpp_contention_table, __libcpp_atomic_monitor, __libcpp_atomic_wait, __cxx_atomic_notify_one), libcxx/include/__atomic/atomic_sync.h
+- **libstdc++ C++20 atomic wait/notify (src/c++20/atomic.cc, bits/atomic_wait.h)** (rel 3, source-file, GPL-3.0-or-later with GCC Runtime Library Exception (GitHub mirror reports GPL-2.0 for the repo): reimplement the idea, do not copy text.) https://github.com/gcc-mirror/gcc/blob/master/libstdc++-v3/src/c++20/atomic.cc
+  - bottlenecks: P1, P5
+  - Reference for std::atomic::wait: direct futex for 32-bit objects, hashed proxy waiter pool otherwise; __spin_impl uses 16 spins (the first 12 with a relax hint) before FUTEX_WAIT. Shows a cheap user-space check-then-park protocol and a futex wrapper with FUTEX_WAIT_BITSET absolute timeouts. A 2026 patch fixed an assertion in proxy wait, so read the current tree. Embedded toolchains may not have C++20 wait, so this is more a design reference.
+  - speed claim: none
+  - read: libstdc++-v3/src/c++20/atomic.cc: __spin_impl, atomic_spin_count(_relax), futex wait/wake wrappers, libstdc++-v3/include/bits/atomic_wait.h
+- **libstdc++ atomic_wait (C++20 std::atomic::wait/notify)** (rel 3, source-file, GPL-3.0 with GCC Runtime Library Exception (idea only; use the standard facility, do not copy)) https://github.com/gcc-mirror/gcc/blob/master/libstdc%2B%2B-v3/include/bits/atomic_wait.h
+  - bottlenecks: P1, P5
+  - Shows how the standard library layers futex wait on a hashed waiter table with a spin phase. If SIH's toolchain allows C++20 on POSIX, std::atomic<uint32_t>::wait/notify_one on the generation counter removes the polling loop with no new dependency.
+  - speed claim: none
+  - read: libstdc++-v3/include/bits/atomic_wait.h (waiter pool, spin policy), libstdc++-v3/include/bits/atomic_timed_wait.h
+- **libstdc++ atomic_wait.h / semaphore_base.h** (rel 3, library, GPL-3.0 with GCC Runtime Library Exception (reimplement the idea, do not copy text)) https://github.com/gcc-mirror/gcc/blob/2397b3b0422d72744b03d1330dc346db4b81846f/libstdc%2B%2B-v3/include/bits/atomic_wait.h
+  - bottlenecks: P1
+  - Second implementation of the same C++20 wait/notify idea (waiter pool with spin count before futex). Useful to compare spin thresholds and the proxy-waiter table with libc++. I confirmed the files exist but did not read their contents.
+  - speed claim: none
+  - read: libstdc++-v3/include/bits/atomic_wait.h, libstdc++-v3/include/bits/atomic_timed_wait.h, libstdc++-v3/include/bits/semaphore_base.h
+- **max0x7ba/atomic_queue** (rel 3, library, MIT (adaptable with attribution)) https://github.com/max0x7ba/atomic_queue
+  - bottlenecks: P1, P2
+  - Its README makes the spin-vs-block argument explicit: blocked-thread wake-up latency is about 1-3 us, while a spin round trip can be under 100 ns. That is the justification for a spin-then-park wait in the lockstep path, and it warns that handing spin to an OS primitive has no good answer. Design notes on fixed power-of-two ring and minimal atomics are liftable.
+  - speed claim: Claim (README, read): 'wake-up latency of a blocked thread is about 1-3 microseconds' and queue 'round-trip time ... can be below 100 nanoseconds'. Hardware not stated in the lines I read.
+  - read: README.md (design-goals section), include/atomic_queue/atomic_queue.h
+- **mjlab and MuJoCo Playground (domain randomization at scale)** (rel 3, library, Apache-2.0 (copyable with attribution)) https://github.com/google-deepmind/mujoco_playground
+  - bottlenecks: C12, C7, C6
+  - Show how a large catalog of physical variables (friction, mass, inertia, gains, body positions) is randomized per world by overriding model fields with batched arrays, and how environments declare randomization functions. mjlab (https://github.com/mujocolab/mjlab, Apache-2.0, pushed 2026-11-01) is the Isaac Lab style manager layer on MJWarp. The variable catalog and sampler layout are what a SIH experiment layer needs.
+  - speed claim: none
+  - read: mujoco_playground randomization functions (look for domain_randomize in each environment folder), paper https://arxiv.org/abs/2502.08844, mjlab event and randomization managers
+- **ns-3 RngSeedManager / RngStream / random-variable-stream** (rel 3, library, GPL-2.0 (idea only)) https://github.com/nsnam/ns-3-dev-git
+  - bottlenecks: C1, C12
+  - Separate seed (SetSeed), run number (SetRun) and per-object stream index give independent substreams from MRG32k3a. This is the standard fix for the shared rand() problem: one stream per noise source, seeded from (seed, run, stream). Licence is GPL-2.0, so reimplement the scheme only. Small enough to rewrite in a day.
+  - speed claim: none
+  - read: src/core/model/rng-seed-manager.cc/.h, src/core/model/rng-stream.cc/.h, src/core/model/random-variable-stream.cc/.h
+- **ns-3 RngStream (L'Ecuyer MRG32k3a streams and substreams)** (rel 3, write-up, GPL-2.0-only for ns-3 code (idea only, do not copy text); the MRG32k3a algorithm itself is published (L'Ecuyer)) https://www.nsnam.org/docs/manual/html/random-variables.html
+  - bottlenecks: C1, C12
+  - Network-simulation convention that matches experiment design: seed + run number + stream index, with substreams so replications never overlap, and global SetRun for sweeps. The manual states there is no guarantee streams from two different seeds do not overlap, only stream/substream guarantees. Pattern for a SIH_SEED + SIH_RUN parameter pair.
+  - speed claim: none
+  - read: manual random-variables chapter, src/core/model/rng-stream.cc (RngStream(seed, stream, substream)), src/core/model/rng-seed-manager.cc
+- **ns-3 RngStream (L'Ecuyer MRG32k3a with streams and substreams) + RngSeedManager** (rel 3, library, GPL-2.0 (GitHub shows NOASSERTION): reimplement the idea only) https://github.com/nsnam/ns-3-dev-git/blob/070465047fd0b4fa62ba29fb35bd144fa6251f45/src/core/model/rng-stream.cc
+  - bottlenecks: C1, C12, P6
+  - The classic network-simulator answer: one global seed plus a 'run number' selects a substream, each model owns a fixed 'stream index', and AssignStreams pins them. Replication runs are independent without reseeding. Pattern for SIH 'seed + run id + stream id' naming of conditions.
+  - speed claim: none
+  - read: src/core/model/rng-stream.cc: RngStream ctor (seedNumber, stream, substream), MRG32k3a namespace, src/core/model/rng-seed-manager.cc, https://www.nsnam.org/docs/manual/html/random-variables.html
+- **ns-3 realtime simulator and WallClockSynchronizer** (rel 3, simulator, GPL-2.0 (GitHub shows 'other'; not read): idea only unless verified) https://github.com/nsnam/ns-3-dev-git/blob/master/src/core/model/wall-clock-synchronizer.cc
+  - bottlenecks: P2
+  - Direct comparison for P2. DoSynchronize decides between a sleep and a spin-wait because clock_nanosleep cannot sleep less than about a jiffy; the file has the reasoning in comments and a spin to the exact target time. Compare to usleep(100)/usleep(0) in SIH.
+  - speed claim: none
+  - read: src/core/model/wall-clock-synchronizer.cc: DoSynchronize (line ~147), DoEventStart (~286, spin at ~303), comments lines ~52-59, src/core/model/realtime-simulator-impl.cc
+- **oneTBB concurrent_monitor / waiters** (rel 3, library, Apache-2.0 (adaptable with attribution)) https://github.com/oneapi-src/oneTBB/blob/c5557dce7d5a299c7dbefe1ef39ee26bc16fbfb1/src/tbb/concurrent_monitor.h
+  - bottlenecks: P5
+  - Production prepare_wait / commit_wait / cancel_wait / notify monitor with a circular wait list; shows how a thread pool wakes only the workers that need it. Relevant to work queue wakeups per step.
+  - speed claim: none
+  - read: src/tbb/concurrent_monitor.h: concurrent_monitor_base::prepare_wait/commit_wait/cancel_wait/notify, src/tbb/waiters.h, src/tbb/misc.h (backoff)
+- **parking_lot_core (park / unpark_filter / unpark_requeue)** (rel 3, library, MIT OR Apache-2.0) https://github.com/Amanieu/parking_lot/blob/master/core/src/parking_lot.rs
+  - bottlenecks: P5, P1
+  - Per-thread parker with a hash table of wait queues keyed by address. unpark_filter(key, filter) visits waiters and wakes only those whose park token satisfies a predicate. A waiter could store its deadline as the park token and the time master could wake exactly the due ones in one pass. unpark_requeue moves waiters between queues without waking, avoiding herd wake-ups. MIT or Apache-2.0.
+  - speed claim: none
+  - read: core/src/parking_lot.rs: park() (line 584), unpark_one() (739), unpark_filter() (1052), unpark_requeue() (911), FilterOp (522), core/src/thread_parker/linux.rs (futex-based parker; path not opened)
+- **parking_lot_core (spinwait, Linux futex thread parker)** (rel 3, library, MIT or Apache-2.0) https://github.com/Amanieu/parking_lot
+  - bottlenecks: P1, P5
+  - SpinWait does exponential spin then thread::yield, and the Linux ThreadParker is a bare futex over an AtomicI32 with timeout. Similar in spirit to WebKit ParkingLot and a cleaner reading.
+  - speed claim: none
+  - read: core/src/spinwait.rs, core/src/thread_parker/linux.rs
+- **parking_lot_core spinwait and thread_parker** (rel 3, library, Apache-2.0 or MIT (adaptable with attribution)) https://github.com/Amanieu/parking_lot/tree/85827ffa2ffb0b60d416e2e2a091f36b0e8e5a91/core/src
+  - bottlenecks: P1, P5
+  - SpinWait does 3 rounds of exponentially growing pause then yields up to 10 steps; the Linux thread parker is a thin futex wrapper that handles the 32/64-bit timeout ABI; the parking lot is a hashed queue of waiters keyed by address (one word of state per lock).
+  - speed claim: none
+  - read: core/src/spinwait.rs, core/src/thread_parker/linux.rs, core/src/parking_lot.rs
+- **perf bench futex (wake, requeue, hash, lock-pi)** (rel 3, tool, GPL-2.0 (measurement tool, run it, do not copy it)) https://github.com/torvalds/linux/blob/v6.12/tools/perf/bench/futex-wake.c
+  - bottlenecks: P5
+  - Opened futex-wake.c. It blocks N threads on a futex and wakes them 'N at a time' to measure the latency of nthread wakeups. Run on the WSL2 box (when allowed) it would give a baseline for what one futex_wake of K waiters costs on that hypervisor, and so decide whether batching, co-locating on one CPU, or spinning is worth building. I only saw futex-wake.c; I did not confirm the sibling files by listing, so futex-requeue, futex-hash and the wake-parallel benchmark are leads.
+  - speed claim: none
+  - read: tools/perf/bench/futex-wake.c: bench_futex_wake(), block_threads(), tools/perf/bench/ (futex-requeue.c, futex-wake-parallel.c, sched-pipe.c: leads)
+- **perf bench sched pipe / futex wake (in-tree benchmarks, tools/perf/bench)** (rel 3, tool, GPL-2.0 (perf). Use as a tool; no code lifted.) https://github.com/torvalds/linux/tree/v6.6/tools/perf/bench
+  - bottlenecks: P5, P1
+  - Standard kernel tools for measuring wakeup cost: sched-pipe.c (two-process ping-pong), futex-wake.c, futex-wake-parallel.c, sched-messaging.c. Run under taskset -c 0 versus unpinned inside the WSL2 VM to get the missing per-wake cost. Nothing is built or run in this task; this is a reading pointer only.
+  - speed claim: none
+  - read: tools/perf/bench/sched-pipe.c, tools/perf/bench/futex-wake.c, tools/perf/bench/futex-wake-parallel.c
+- **pyulog (ULog parsing, ulog2csv, db)** (rel 3, library, BSD-3-Clause) https://github.com/PX4/pyulog
+  - bottlenecks: C13, C12
+  - Parses ULog into tables for results and diffing; ulog2csv and db.py give a path from each run to a results table and trace comparison for golden-trace checks.
+  - speed claim: none
+  - read: pyulog/core.py, pyulog/ulog2csv.py, pyulog/db.py, pyulog/params.py
+- **ramcdona/PropDBTools** (rel 3, tool, BSD-2-Clause (from gh repo search metadata)) https://github.com/ramcdona/PropDBTools
+  - bottlenecks: C6, C12
+  - MATLAB tools that parse and fit the UIUC propeller data files. It shows the file layout and how to turn raw wind-tunnel points into CT(J), CP(J) curves, so you do not write the parser yourself.
+  - speed claim: none
+  - read: repo root .m files (not opened)
+- **realtime_tools RealtimeThreadSafeBox / RealtimeBuffer (ros-controls)** (rel 3, library, BSD-3-Clause) https://github.com/ros-controls/realtime_tools
+  - bottlenecks: C10, P5
+  - Opened realtime_thread_safe_box.hpp: try_set/try_get never block (best-effort lock), and RealtimeBuffer is a lock-free writer-to-RT-reader handoff. Fits 'a parameter or scenario update arrives from another thread; the SIH loop must pick it up at the next step without waiting and without a 1 s lag'. BSD-3.
+  - speed claim: none
+  - read: realtime_tools/include/realtime_tools/realtime_thread_safe_box.hpp, realtime_tools/include/realtime_tools/realtime_buffer.hpp, realtime_tools/include/realtime_tools/lock_free_queue.hpp
+- **rigtorp/SPSCQueue** (rel 3, library, MIT (adaptable with attribution)) https://github.com/rigtorp/SPSCQueue
+  - bottlenecks: P5
+  - Small, header-only wait-free SPSC queue. The tricks to lift are cache-line padding of head and tail and caching the other side's index so the hot path rarely touches the shared line. Useful for a per-subscriber queue in a multi-sub uORB design on SITL-class builds.
+  - speed claim: Claim only: README says it is faster than boost::lockfree::spsc and folly::ProducerConsumerQueue; the part I read gave no numbers.
+  - read: include/rigtorp/SPSCQueue.h (writeIdx_, readIdxCache_ and the padding members)
+- **rigtorp/hiccups and rigtorp/c2clat** (rel 3, tool, MIT (adaptable with attribution)) https://github.com/rigtorp/hiccups
+  - bottlenecks: P2, C14
+  - hiccups measures scheduler-induced gaps on busy-loop threads (p99, p99.9, max); c2clat measures core-to-core cache-line latency. Use before and after to find how noisy the host is, which sets how far a busy-spin pacing strategy can be trusted, and to explain timing variance in determinism checks.
+  - speed claim: README example output only (taskset on 4 CPUs, hardware not named): cpu 0 p99.9 6590444 ns, max 17010845 ns; cpu 3 p99.9 4870 ns, max 17869 ns. This is a sample, not a benchmark.
+  - read: README.md, src/ (the sampling loop), sibling repo rigtorp/c2clat
+- **rr record/replay chaos mode (randomised scheduler)** (rel 3, tool, custom MIT-style (Mozilla 2013 header, permission-to-deal text; GitHub NOASSERTION)) https://github.com/rr-debugger/rr/blob/master/src/Scheduler.cc
+  - bottlenecks: C1, C14, P5
+  - Chaos mode pretends 1-8 cores at random and randomises priorities and timeslices to expose order-dependent bugs, and the recording replays exactly. Idea for SIH: test that results are independent of work queue and thread timing by randomising schedule under a seed, and replay the failing schedule.
+  - speed claim: none
+  - read: src/Scheduler.cc: set_enable_chaos, choose_random_priority, random_frac, src/chaos-test/chaos-test.sh
+- **scenario_simulator_v2 (TIER IV)** (rel 3, tool, Apache-2.0 per GitHub. Can adapt with attribution.) https://github.com/tier4/scenario_simulator_v2
+  - bottlenecks: C11, C12, C13
+  - OpenSCENARIO interpreter with storyboards, simulation-time conditions, triggers and events. It is a working scenario layer that changes things at a time or on a trigger and ends with a status. Worth reading for the trigger and event model before designing SIH's C11 file format.
+  - speed claim: none
+  - read: openscenario/openscenario_interpreter/include/openscenario_interpreter/syntax/storyboard.hpp, trigger.hpp, event.hpp, simulation_time_condition.hpp, openscenario/openscenario_interpreter/include/openscenario_interpreter/simulator_core.hpp, simulation/traffic_simulator/include/traffic_simulator/simul
+- **schbench (Chris Mason)** (rel 3, tool, GPL-2.0 (tool)) https://git.kernel.org/pub/scm/linux/kernel/git/mason/schbench.git/
+  - bottlenecks: P5, P1
+  - Wakeup-latency histogram tool: message threads wake workers, p50/p99/p99.9 gap between wake and running. Use to compare scheduling configs on the WSL2 guest. Not read beyond existence plus LKML v1.0 note.
+  - speed claim: none
+  - read: schbench.c, README (v1.0 arguments), LKML https://lkml.rescloud.iu.edu/2304.2/00750.html
+- **scx_chaos (sched_ext scheduler for amplifying race conditions)** (rel 3, tool, GPL-2.0 (scx repo); idea only) https://github.com/sched-ext/scx/tree/24f258e74cedcb64506137ae1a55fadaa26bae7e/scheds/rust/scx_chaos
+  - bottlenecks: C14, C13, P8
+  - Injects random scheduling delays, CPU-frequency scaling, performance degradation and kprobe delays. For SIH it is a determinism and robustness test: if lockstep results change under scx_chaos delays, there is a hidden race. It would also help reproduce the unexplained frozen run in lean mode and the logger-held-lockstep freeze. Needs a sched_ext kernel (not present in default WSL2).
+  - speed claim: none
+  - read: scheds/rust/scx_chaos/README.md: options --random-delay-frequency, --random-delay-min-us, --random-delay-max-us, --cpufreq-*, scheds/rust/scx_chaos/src/bpf/main.bpf.c
+- **scxtop WakerWakeeAnalyzer (sched_ext)** (rel 3, tool, GPL-2.0 (repo license from GitHub API): reimplement the idea only) https://github.com/sched-ext/scx/blob/main/tools/scxtop/src/mcp/waker_wakee_analyzer.rs
+  - bottlenecks: P5
+  - A ready-made data structure for waker-to-wakee relationship stats, in Rust. It keeps (waker_pid, wakee_pid) pairs with wakeup count, latency percentiles, same-CPU and same-LLC percentage and a criticality score. It also detects bidirectional ping-pong pairs, which is the SIH to flight stack handshake pattern. It needs a sched_ext capable kernel for the BPF side, so use it as a design model for the table the graph needs.
+  - speed claim: none
+  - read: tools/scxtop/src/mcp/waker_wakee_analyzer.rs: record_wakeup (170), record_wakee_run (195), get_bidirectional_relationships (329), classify_bidirectional_pattern (515), RelationshipStats (51)
+- **seldak/px4-sitl-regression-lab** (rel 3, tool, MIT) https://github.com/seldak/px4-sitl-regression-lab
+  - bottlenecks: C11, C12, C13
+  - A small third-party harness. YAML scenarios have 'events: at_s, type: inject_failure, unit: gps, failure: off' (via the MAVSDK Failure plugin) plus metric thresholds (max and rms horizontal error, tilt, speed). It extracts metrics from ULog, runs in Docker, and gates CI. It is a ready shape for a SIH scenario file, with timed events, thresholds and a pass/fail exit status. It is outside SIH, so only the schema and metrics are liftable. Small and new; I judged it from the YAML and file tree only.
+  - speed claim: none
+  - read: scenarios/gps_failure.yaml and baseline.yaml, px4_lab/scenario.py, px4_lab/metrics/extract.py, docs/SCENARIOS.md and docs/METRICS.md
+- **signac (data space management for parameter sweeps)** (rel 3, library, BSD-3-Clause) https://github.com/glotzerlab/signac
+  - bottlenecks: C12, C13
+  - Each job is identified by a hash of its parameter set (state point), so identical settings map to one folder, and results and provenance sit beside the inputs. Cheap, file-based way to build the 'all runs, all variables, results table, replay' layer without a server.
+  - speed claim: none
+  - read: signac/job.py and the state point hashing in the signac package
+- **skybrush-io/ap-swarm-launcher** (rel 3, runner-or-infrastructure, MIT) https://github.com/skybrush-io/ap-swarm-launcher
+  - bottlenecks: P6, P4
+  - MIT-licensed launcher for many ArduPilot SITL instances ('simplified ArduPilot SITL launcher for multi-drone simulations'), 22 stars, pushed 2026-10-20 by the repository listing. Look at how it assigns ports and per-instance directories and starts them in a single pass, as a template for parallel SIH runs. Not opened beyond the listing. MIT: code can be adapted with attribution.
+  - speed claim: none
+  - read: repository root; not read
+- **sled simulation guide** (rel 3, write-up, N/A (blog)) https://sled.rs/simulation.html
+  - bottlenecks: C11, C14, C12
+  - Short practical guide: time is an argument (tick(at)), a priority queue keyed on delivery time, messages randomly delayed/dropped/reordered, and failing inputs minimised by dropping initial events until minimal. Maps to C14 latency/jitter model and to scenario minimisation. Does not cover seed handling (page is silent).
+  - speed claim: none
+  - read: whole page; sections on network model, clock and shrinking
+- **theartful/broadcast_queue** (rel 3, library, MIT (adaptable with attribution)) https://github.com/theartful/broadcast_queue
+  - bottlenecks: P5
+  - Single-producer multiple-consumer broadcast queue: each subscriber has its own cursor and a slow subscriber loses data rather than blocking the writer. That is exactly the semantics of a uORB queued topic with several subscribers, built lock-free.
+  - speed claim: Repo description: 'blazingly fast'. No figure opened.
+  - read: README.md and the main header (broadcast_queue.hpp); not read in detail
+- **vHive and REAP (record-and-prefetch snapshots)** (rel 3, paper, vHive repo: MIT (vhive-serverless/vHive); paper ideas only) https://arxiv.org/abs/2101.09355
+  - bottlenecks: P4
+  - Measured that snapshot restore is slow because state is faulted in one page at a time, and that the working set is stable across runs. REAP records the touched pages on first run and prefetches them in one read. Applies if a restored PX4 image is large: record which pages a standard run touches and pre-load them.
+  - speed claim: Claim (abstract, opened): function started from a snapshot has execution time '95% higher, on average' than when memory-resident, due to page faults. The 3.7x average cold-start reduction for REAP came from a search summary, not re-opened; Firecracker + Containerd, hardware not read.
+  - read: arxiv 2101.09355 Sections on page-fault analysis and REAP design, github.com/vhive-serverless/vHive: ctriface/, snapshotting code (not opened)
+- **wasmtime copy-on-write memory images and pooled slot reset** (rel 3, source-file, Apache-2.0 with LLVM exception (adapt with attribution)) https://github.com/bytecodealliance/wasmtime/blob/main/crates/wasmtime/src/runtime/vm/cow.rs
+  - bottlenecks: P4, P6
+  - In-process reset of a memory region to an initial image: memfd-backed CoW mapping, instance slots reused in a pool, reset by madvise(MADV_DONTNEED) or by manually rewriting only the touched region. This is the lift for 'put all SIH and vehicle state in one arena, restore it in microseconds'. Linux host only, opt-in, not on MCU.
+  - speed claim: none
+  - read: MemoryImage and MemoryImageSlot (lines ~34-420), manually_reset_region (~696), decommit (~884), create_memfd_with_data (~849)
+- **wtf (what the fuzz) snapshot fuzzer: Init/InsertTestcase/Restore target API** (rel 3, tool, MIT (attribution allowed)) https://github.com/0vercl0k/wtf
+  - bottlenecks: P4, C13
+  - Clean harness contract for snapshot-based runs: Target_t(name, Init, InsertTestcase, Restore, ...). Backends (bochscpu, WHV, KVM) share the same snapshot, bochscpu is fully deterministic and used for development. The split 'deterministic slow backend for traces, fast backend for throughput' mirrors golden-trace verification (C13).
+  - speed claim: README author claim: KVM backend 'fastest for long executions (~500m - 1.5 billion instructions; ~100x faster than bochscpu, ~10x faster than whv when I was fuzzing IDA)'. Single anecdote, hardware not stated.
+  - read: README.md (backends, Target_t), src/wtf/ (backend implementations; not opened)
+- **ASAM OpenSCENARIO XML conditions, triggers and storyboard (specification)** (rel 2, write-up, Specification (ASAM terms), no code) https://openscenario.asam.net/ASAM_OpenSCENARIO_XML/v1.3.0/07_components_scenario/07_06_conditions_triggers.html
+  - bottlenecks: C11, C12
+  - The spec text for trigger semantics: a trigger is condition groups (OR of ANDs), an empty trigger is always false, a missing stop trigger means the tool decides the end, an event without a start trigger starts with its act. Useful as vocabulary when designing the scenario file, so it can later be exported to a standard format. Seen through a search snippet and a HEAD check; the v1.4.0 Event page was listed but not opened here.
+  - speed claim: none
+  - read: 07.06 Conditions and triggers, Class Event: https://openscenario.asam.net/ASAM_OpenSCENARIO_XML/v1.4.0/generated/content/Event.html, Migration guide chapter 5 Storyboard
+- **Abc-Arbitrage/Disruptor-cpp** (rel 2, library, Apache-2.0 (adaptable with attribution)) https://github.com/Abc-Arbitrage/Disruptor-cpp
+  - bottlenecks: P1, P5
+  - C++ port of the Disruptor, so wait strategies and the sequence barrier are already in C++ and could be read for shape. Not read in detail.
+  - speed claim: none
+  - read: Disruptor/ (wait strategy headers: BusySpinWaitStrategy, YieldingWaitStrategy, SleepingWaitStrategy, BlockingWaitStrategy)
+- **Accelerating Burst Parallelism of SigmaOS processes with CRIU (MIT thesis)** (rel 2, paper, thesis; ideas only) https://dspace.mit.edu/handle/1721.1/164651
+  - bottlenecks: P4, P6
+  - Tuned CRIU restore for starting many processes at once; relevant to launching N parallel SIH instances from one image (P6). Only the abstract-level description was seen.
+  - speed claim: none
+  - read: Full thesis text at the dspace.mit.edu handle: restore-path optimizations chapter
+- **Accellera SystemC kernel (timed event queue, delta cycles)** (rel 2, simulator, Apache-2.0 (unverified in repo)) https://github.com/accellera-official/systemc/tree/main/src/sysc/kernel
+  - bottlenecks: P5, C14
+  - Discrete-event kernel that runs all processes ready at one simulated time to completion (delta cycles), then advances to the next timed event from a priority queue. Shows a well-tested model of 'time advanced, run what is due, only then move on'. Heavy as a whole, so only the scheduling loop applies. Apache-2.0 for recent releases (not checked in the repo).
+  - speed claim: none
+  - read: src/sysc/kernel/sc_simcontext.cpp: crunch(), do_timestep(), src/sysc/kernel/sc_event.cpp: timed notification, src/sysc/utils/sc_ppq.h (path not verified)
+- **Adamant (lasp/adamant) component framework** (rel 2, library, Apache-2.0 (confirmed via gh search)) https://github.com/lasp/adamant
+  - bottlenecks: P5, C13
+  - Ada flight framework from LASP with passive, active and queued component kinds and generated unit-test harnesses, so another take on the F Prime split. Its architecture document describes the execution model. Only the file tree was checked.
+  - speed claim: none
+  - read: doc/architecture_description_document/architecture_description_document.tex, doc/example_architecture/active_component/ and the passive/queued examples next to it
+- **AeroSandbox atmosphere** (rel 2, library, MIT) https://github.com/peterdsharpe/AeroSandbox
+  - bottlenecks: C5
+  - ISA plus a smooth differentiable interpolated atmosphere (knot-point model) and non-standard offsets; a small, MIT reference for C5 density and temperature models. Wider library is design-optimisation and unrelated to the step loop.
+  - speed claim: none
+  - read: aerosandbox/atmosphere/_isa_atmo_functions.py, aerosandbox/atmosphere/_diff_atmo_functions.py, aerosandbox/atmosphere/atmosphere.py
+- **AirSim clock and pause API (ClockSpeed, simPause, simContinueForTime, simContinueForFrames)** (rel 2, simulator, MIT) https://github.com/microsoft/AirSim/blob/main/docs/settings.md
+  - bottlenecks: P3, C10, C11
+  - Settings has ClockType and ClockSpeed; the client API simContinueForTime(seconds) runs sim for a fixed simulated span then pauses, which is a ready 'run N seconds then return' primitive for a scenario runner (C11).
+  - speed claim: none
+  - read: PythonClient/airsim/client.py lines ~87-114, docs/settings.md ClockSpeed section
+- **Analyzing the coupling process of distributed mixed real-virtual prototypes (time-delay compensation)** (rel 2, paper, ) https://arxiv.org/abs/2401.11779
+  - bottlenecks: C14, P1
+  - Treats constant coupling time delay as a fault and compensates it with small feedforward neural networks, using frequency-domain bandwidth knowledge. Useful for how to assess the effect of a fixed actuator delay on a closed loop.
+  - speed claim: none
+  - read: Frequency-domain analysis of coupling faults section
+- **Android Zygote (preload then fork)** (rel 2, source-file, Apache-2.0) https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/com/android/internal/os/ZygoteInit.java
+  - bottlenecks: P4, P6
+  - A warm process preloads shared state and forks per app, relying on copy-on-write. Also the standard example of why it only works when no extra threads exist at fork time (from my recollection; the file was only confirmed to exist, HTTP 200, not read; a web search to cross-check was refused by the search budget).
+  - speed claim: none
+  - read: frameworks/base/core/java/com/android/internal/os/ZygoteInit.java (preload), frameworks/base/core/jni/com_android_internal_os_Zygote.cpp (fork path; path from memory, not confirmed)
+- **Antithesis SDK (C++/Rust/Go)** (rel 2, library, MIT (SDK only)) https://github.com/antithesishq/antithesis-sdk-cpp
+  - bottlenecks: C11, C12
+  - Assertion and randomness API (always, sometimes, reachable, random choice) that is a no-op outside the Antithesis platform. Idea: SIH scenario assertions of type 'sometimes' and 'always' across a sweep to report coverage of rare conditions. Platform itself is a closed service and cannot be embedded; only the SDK pattern is useful.
+  - speed claim: none
+  - read: antithesis_sdk.h (assertion macros, random functions), README.md l.5
+- **Antithesis SDK for Python (assertions and reachability)** (rel 2, library, MIT) https://github.com/antithesishq/antithesis-sdk-python
+  - bottlenecks: C13, C11
+  - Shows the assertion vocabulary (always, sometimes, reachable, unreachable) a deterministic-simulation product uses to report which properties a run exercised. The hypervisor itself is closed; only the property-reporting idea transfers to a scenario layer.
+  - speed claim: none
+  - read: antithesis/assertions.py, README.md
+- **Antithesis deterministic hypervisor (docs and blog) and WarpStream case study** (rel 2, write-up, Closed. Ideas only.) https://antithesis.com/docs/configuration/the_antithesis_environment/
+  - bottlenecks: P3, P8, C14
+  - States the design rules that make virtual time fast: idle periods are fast-forwarded, race-to-sleep code is cheap, busy-wait loops that read the clock are slow, RDTSC/RDRAND cost more, CPU speed can be varied as fault injection. For SIH this argues for replacing poll loops with blocking handoffs and for treating 'simulated CPU speed' as a variable (C14).
+  - speed claim: claim from WarpStream blog (opened): 'Antithesis ran the WarpStream workload for 6 wall clock hours, during which it simulated 280 hours of application time.' Hardware not stated. https://www.warpstream.com/blog/deterministic-simulation-testing-for-our-entire-saas
+  - read: https://antithesis.com/docs/configuration/the_antithesis_environment/, https://antithesis.com/blog/deterministic_hypervisor/ (page exists, not read), https://www.warpstream.com/blog/deterministic-simulation-testing-for-our-entire-saas
+- **Antithesis deterministic hypervisor (write-up)** (rel 2, write-up, closed product; blog ideas only) https://antithesis.com/blog/deterministic_hypervisor/
+  - bottlenecks: P4, C1, C13
+  - Describes snapshot then fork the whole system state at an interesting moment and explore many futures; determinism makes every branch reproducible. Same shape as 'converge once, branch many scenarios with seeds'. Not liftable code.
+  - speed claim: none
+  - read: antithesis.com/blog/deterministic_hypervisor/, antithesis.com/docs/introduction/how_antithesis_works.md
+- **Arcade Learning Environment cloneState / restoreState** (rel 2, simulator, GPL-2.0: ideas only) https://github.com/Farama-Foundation/Arcade-Learning-Environment
+  - bottlenecks: P4, C1, C13
+  - Emulator state object that can be cloned, restored and serialized, including the emulator's RNG, used for tree search and Go-Explore style restores. Only existence of the state files confirmed; contents not opened.
+  - speed claim: none
+  - read: src/ale/environment/ale_state.cpp, ale_state.hpp
+- **ArduPilot Tools/autotest/param_metadata (parameter doc generator)** (rel 2, tool, GPL-3.0) https://github.com/ArduPilot/ardupilot/tree/b7c08d4dbc69f58f5636642698b63a9130725db6/Tools/autotest/param_metadata
+  - bottlenecks: C12
+  - Parses @DisplayName/@Description/@Range/@Units/@Values comments out of C++ AP_GROUPINFO sources and emits json, xml, md, rst, html. A pattern for generating a variable catalogue (name, range, units) directly from the source of SIH parameters so the experiment-design layer never drifts from code. PX4 already has module.yaml parameters, so the lift is the emitter idea, not the parser.
+  - speed claim: none
+  - read: Tools/autotest/param_metadata/param_parse.py, jsonemit.py, emit.py
+- **ArduPilot forum: multi-vehicle faster-than-real-time SITL with Gazebo Harmonic** (rel 2, write-up, ) https://discuss.ardupilot.org/t/multi-vehicle-faster-than-real-time-sitl-with-gazebo-harmonic/141068
+  - bottlenecks: P3, P6
+  - A field report on running several vehicles at high speedup and where it becomes unstable. Gives an independent data point on speedup limits with an external physics engine, against which SIH's in-process loop should look much better.
+  - speed claim: claim, seen only as a search-result summary, thread page not read: a single Gazebo-based vehicle unstable at roughly 13x real-time factor, and about 8x achieved at SIM_SPEEDUP 10. Hardware not captured.
+  - read: the thread itself (not read in this pass)
+- **ArduPilot/ParameterRepository (all generated parameters per version)** (rel 2, tool, none stated) https://github.com/ArduPilot/ParameterRepository
+  - bottlenecks: C12
+  - Generated parameter dumps for every ArduPilot version; with names, ranges and units it is the cheapest way to extract a machine-readable catalogue of SIM_ variables (the owner's C12 catalogue idea) without reading C++. Listing only; contents not opened. Licence none stated.
+  - speed claim: none
+  - read: repository root; look for the SITL/SIM_ entries
+- **ArduPilot/SITL_Models (aircraft model library for SITL)** (rel 2, library, none stated (no licence means no text may be copied)) https://github.com/ArduPilot/SITL_Models
+  - bottlenecks: C7, C12
+  - Separate repository of aircraft models for SITL, pushed 2026-08-05, licence field shows none. Not opened beyond the repo listing, so contents and format are unknown. Check whether it holds parameterised vehicle descriptions usable as test cases for C7 (geometry, mass, inertia).
+  - speed claim: none
+  - read: repository root listing; not read
+- **ArduPilot/ardupilot_gazebo (Gazebo Sim plugin using the JSON lockstep protocol)** (rel 2, simulator, LGPL-3.0) https://github.com/ArduPilot/ardupilot_gazebo
+  - bottlenecks: P1, P3, C14
+  - Reference client of the SIM_JSON lockstep protocol: shows what an external time master sends and waits for each step. Mainly useful for the protocol and for the way it ties Gazebo's step to the autopilot's reply. LGPL-3.0, so reimplement ideas only. 239 stars, pushed 2026-10-29. Not opened beyond the listing.
+  - speed claim: none
+  - read: src/ArduPilotPlugin.cc (path from memory, not confirmed): the lockstep send/receive per step
+- **Auterion/px4-jsbsim-bridge** (rel 2, simulator, BSD-3-Clause) https://github.com/Auterion/px4-jsbsim-bridge
+  - bottlenecks: C7, C5, C4
+  - JSBSim bridge for PX4 SITL/HITL, fixed-wing aerodynamics and atmosphere from data tables. Lead for C7 and C5 (parameterised wing aero and ISA atmosphere). Existence confirmed by search listing only.
+  - speed claim: none
+  - read: src/ (not opened)
+- **Ax and BoTorch (adaptive experimentation, Bayesian optimisation)** (rel 2, library, MIT) https://github.com/meta/Ax
+  - bottlenecks: C12
+  - Batch and multi-objective Bayesian optimisation with constraints, for 'find the worst case with the fewest flights'. Only worth it when each flight is expensive; with a fast SIH, plain QMC plus Morris may be enough. BoTorch is at github.com/meta-pytorch/botorch (MIT).
+  - speed claim: none
+  - read: ax/service/ax_client.py area of the repo (not opened)
+- **Betaflight SITL (src/platform/SIMULATOR/sitl.c) and sitl_harness.py** (rel 2, simulator, GPL-3.0) https://github.com/betaflight/betaflight/blob/master/src/platform/SIMULATOR/sitl.c
+  - bottlenecks: P2, P3, C13
+  - Not lockstep: it uses a simRate multiplier on a monotonic clock, with delayMicroseconds divided by simRate, and mutex handoff (updateLock, mainLoopLock) between the UDP FDM thread and the main loop. A cautionary pattern for scaling timeouts by sim rate. src/test/sitl/sitl_harness.py and sitl_gyro_unittest.cc give a small SITL test harness.
+  - speed claim: none
+  - read: src/platform/SIMULATOR/sitl.c: updateState (275), micros64 (699-720), delayMicroseconds (766), src/test/sitl/sitl_harness.py
+- **Beyond Thread States: eBPF and thread dynamics (arXiv 2605.25298)** (rel 2, paper, arXiv paper) https://arxiv.org/abs/2605.25298
+  - bottlenecks: P5
+  - 16 eBPF metrics including futex waits to trace which thread blocks on which resource. Would let the next stage find who is waiting on what in the px4 process, without touching SIH code.
+  - speed claim: none
+  - read: abstract and the futex metric definitions
+- **Boost list thread: Performance of various mutex implementations on Linux** (rel 2, write-up, Mailing list text) https://lists.boost.org/archives/list/boost@lists.boost.org/thread/PK2W5S5DD75OGQDD6VMOZLLIYG2UH3FY/
+  - bottlenecks: P1, P2
+  - Old but direct comparison of spinlock, sched_yield, futex and pthread mutex, with a note that sched_yield behaviour is not well defined outside SCHED_FIFO and varies across scheduler versions. Useful as a caution on the 'yield' step in a backoff ladder.
+  - speed claim: From a search summary, not opened in full: about 42 ns spinlock, 31 ns yield, 66 ns futex, 25 ns pthreads on x86, 2007-era hardware, a lock/unlock loop not a wake-up ping-pong.
+  - read: the thread posts with the benchmark source and results
+- **Breach and STLRom** (rel 2, tool, GitHub lists 'other' for both; check LICENSE) https://github.com/decyphir/breach
+  - bottlenecks: C12, C11
+  - Falsification and requirement mining by parameter sweeps over input signals; STLRom is a C++ robust online STL monitor with Python bindings (decyphir/STLRom). Alternative to RTAMT for monitors; Breach itself is MATLAB.
+  - speed claim: none
+  - read: decyphir/STLRom (C++ monitor source), decyphir/breach core sampling and falsification classes (not opened)
+- **Brown, Calendar queues (CACM 1988)** (rel 2, paper, Paper, free to reimplement) https://doi.org/10.1145/63039.63045
+  - bottlenecks: P5, C14
+  - Original calendar queue: bucketed event list with adaptive bucket width and resize, amortised O(1). Confirmed in Crossref. Fits a time master that has many near-future events with regular spacing, as in fixed-rate sensor and loop schedules.
+  - speed claim: none
+  - read: Resize and bucket-width heuristics sections
+- **CARLA synchronous mode (EpisodeSettings: synchronous_mode, fixed_delta_seconds, no_rendering_mode, substepping)** (rel 2, simulator, MIT (code; assets separate)) https://github.com/carla-simulator/carla/blob/master/LibCarla/source/carla/rpc/EpisodeSettings.h
+  - bottlenecks: P3, P6, C10, C11, C14
+  - Docs (0.9.6/0.9.7, via search, not the current release) say the sim waits for a tick between updates, warn that synchronous mode needs a fixed step or physics tries to catch up the waiting time, and that fixed_delta_seconds=None means 'as fast as possible, each step the same simulated increment'. Also a 'substepping' setting (physics sub-steps per frame, bounded by max_substep_delta_time and max_substeps). Note: SIH already has the fixed-step property; the lesson is the single settings struct that can be changed through the API at runtime (C10).
+  - speed claim: none
+  - read: LibCarla/source/carla/rpc/EpisodeSettings.h, Unreal/CarlaUE4/Plugins/Carla/Source/Carla/Game/CarlaEngine.cpp (tick handling, not read), https://carla.readthedocs.io/en/0.9.7/configuring_the_simulation/
+- **CARLA synchronous mode and fixed time-step determinism rules** (rel 2, simulator, MIT (code); assets differ) https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/
+  - bottlenecks: P3, C14, C13, P4
+  - Lists the conditions CARLA documents for reproducible physics: synchronous mode and fixed delta enabled before the world loads, reload the world per repetition, batch commands. Useful as a checklist for SIH's 'as fast as possible' mode and timing controls.
+  - speed claim: none
+  - read: section 'Physics determinism' (~line 168 of the page text), section 'Fixed time-step'
+- **CCBlade (blade element momentum)** (rel 2, library, listed as 'other' on GitHub; not checked) https://github.com/NLRWindSystems/CCBlade
+  - bottlenecks: C6, P7
+  - BEMT with guaranteed convergence and smooth derivatives; a possible source for a per-rotor thrust/torque versus inflow curve (C6). Not opened; likely too heavy for flash but its table-generation idea could produce a lookup.
+  - speed claim: none
+  - read: ccblade/ccblade.py: solve and residual functions
+- **CPython multiprocessing forkserver** (rel 2, source-file, PSF-2.0 (permissive; adapt with attribution)) https://github.com/python/cpython/blob/main/Lib/multiprocessing/forkserver.py
+  - bottlenecks: P4, P6
+  - A clean small fork-server design: a single-threaded server started early, preloads modules, passes file descriptors over a Unix socket, authkey for connections, 'alive' pipe so the server dies with its parent. Shows the process layout a PX4 launcher could use for isolation per instance. Only useful if a fork point exists before PX4 threads start.
+  - speed claim: none
+  - read: ForkServer class: connect_to_new_process, set_forkserver_preload, popen_forkserver.py
+- **Cadmium v2 (SimulationEverywhere/cadmium_v2)** (rel 2, library, MIT (confirmed from LICENSE; SPDX shows NOASSERTION): adaptable with attribution) https://github.com/SimulationEverywhere/cadmium_v2
+  - bottlenecks: C11, C14, P5
+  - Header-only C++ DEVS simulator with root_coordinator.simulate(timeInterval) and a separate parallel_root_coordinator.hpp. Coordinator and simulator split is a clean model of 'advance to next event then run exactly the components scheduled'. Hybrid support: none found in what I opened (the repo's own file list showed no solver code). Mostly a structure reference.
+  - speed claim: none
+  - read: include/cadmium/core/simulation/root_coordinator.hpp (simulate), include/cadmium/core/simulation/coordinator.hpp, include/cadmium/core/simulation/parallel_root_coordinator.hpp, include/cadmium/core/logger/csv.hpp (logging)
+- **Caladan / Shenango (CPU scheduling with spin and park)** (rel 2, runner-or-infrastructure, Apache-2.0) https://github.com/shenango/caladan
+  - bottlenecks: P1, P6
+  - Microsecond-scale user-level scheduler that decides when to spin versus yield a core; relevant to many parallel runs competing for cores (P6) and to deciding a spin budget under contention. Heavy and kernel-module based, so ideas only. Not read in detail; no figures opened.
+  - speed claim: none
+  - read: README.md and the paper it cites (not opened)
+- **ChibiOS SIMIA32 port + simulator HAL** (rel 2, runner-or-infrastructure, unverified here: older ChibiOS was GPL-3 and newer is Apache-2.0. Check the header before lifting any text.) https://github.com/ChibiOS/ChibiOS/tree/master/os/common/ports/SIMIA32
+  - bottlenecks: P5, P1
+  - Opened the source. One host thread with a hand-written context switch (_port_switch in chcore.c). There are no signals or timer threads: 'interrupts' are polled from the idle loop by _sim_check_for_interrupts(), which compares gettimeofday to the next tick time and calls chSysTimerHandlerI and chSchDoPreemption if due (hal_lld.c). A deterministic poll-from-idle model. A virtual-time variant would replace gettimeofday with a counter.
+  - speed claim: none
+  - read: os/hal/ports/simulator/posix/hal_lld.c: hal_lld_init, _sim_check_for_interrupts, os/common/ports/SIMIA32/chcore.c: _port_switch
+- **Chromium zygote (Linux)** (rel 2, source-file, BSD-3-Clause (adapt with attribution)) https://github.com/chromium/chromium/tree/main/content/zygote
+  - bottlenecks: P4, P6
+  - Another production fork server for a multiprocess, multithreaded app; useful as a second reference for fd passing and sandbox setup before fork. Not opened beyond file listing.
+  - speed claim: none
+  - read: content/zygote/zygote_linux.cc, content/zygote/zygote_main_linux.cc
+- **Chronicle Threads Pauser** (rel 2, library, Apache-2.0 (repo reports NOASSERTION, check headers)) https://github.com/OpenHFT/Chronicle-Threads/blob/ea/src/main/java/net/openhft/chronicle/threads/Pauser.java
+  - bottlenecks: P1, P2
+  - Pauser interface with busy(), yielding(minBusy), millis(min,max), balanced, sleepy and timed variants, with a reset() on progress. Another example of a named-strategy factory chosen by config, with a minBusy spin budget before escalating. Found by name only; file exists, not read.
+  - speed claim: none
+  - read: src/main/java/net/openhft/chronicle/threads/Pauser.java: busy(), yielding(), millis(), pause(), reset()
+- **Co-simulation errors due to step size changes** (rel 2, paper, ) https://arxiv.org/abs/2512.13845
+  - bottlenecks: C14
+  - Shows that for a variable coupling step, extrapolation errors in integrated states can grow even when the step is reduced. A caution for any variable-step or jitter knob.
+  - speed claim: none
+  - read: Abstract and the integrated-state discrepancy example
+- **CoppeliaSim stepped mode via ZMQ remote API** (rel 2, library, mixed per directory (license files in repo); not read in full) https://github.com/CoppeliaRobotics/zmqRemoteApi
+  - bottlenecks: P1, C11
+  - sim.setStepping(true) then sim.step(wait=True) gives a client-driven lockstep with an explicit wait flag. Small API worth matching for an external-supervisor interface.
+  - speed claim: none
+  - read: clients/python/src/coppeliasim_zmqremoteapi_client/__init__.py setStepping and step (lines ~288-291)
+- **Crashing simulated planes is cheap (Timperley et al., ICST 2018)** (rel 2, paper, paper) https://doi.org/10.1109/icst.2018.00040
+  - bottlenecks: C12, C13
+  - Empirical study of whether ArduPilot-style simulation detects robotics bugs early; useful for what classes of bug a simulator can and cannot expose, and how bugs were reproduced. Abstract and body not opened.
+  - speed claim: none
+  - read: paper (DOI 10.1109/icst.2018.00040); EasyChair preprint 10.29007/hggx
+- **CrazySim (gtfactslab)** (rel 2, simulator, GPL-3.0) https://github.com/gtfactslab/CrazySim
+  - bottlenecks: P5, P6
+  - Crazyflie firmware compiled for Linux as SITL, linked to Gazebo by sockets with a per-instance port (19950+N), tested with up to 16 vehicles per its paper. I did not read its time handling. Lead only.
+  - speed claim: none
+  - read: README and the firmware submodule's SITL platform files (path not found; the fork name I tried returned 404), paper https://coogan.ece.gatech.edu/papers/pdf/llanes2024crazysim.pdf
+- **Crazyflow** (rel 2, simulator, MIT (confirmed via gh)) https://github.com/utiasDSL/crazyflow
+  - bottlenecks: C6, C7, C12, P7
+  - A JAX drone simulator with batched worlds and randomisation. I did not read the code. It is only a lead for per-motor and per-drone parameter handling, and for how a sweep over drone parameters is declared.
+  - speed claim: none
+  - read: repository README and the simulation core module (not opened by me)
+- **DART** (rel 2, physics-engine, BSD-2-Clause (copyable with attribution)) https://github.com/dartsim/dart
+  - bottlenecks: P7, C9
+  - World::step orchestrates integration and a ConstraintSolver with a swappable boxed LCP solver and collision detector. Reference for contact and gear modelling if C9 needs friction cones and restitution.
+  - speed claim: none
+  - read: dart/simulation/World.cpp (step), dart/constraint/ConstraintSolver.cpp, dart/constraint/BoxedLcpConstraintSolver.cpp
+- **DPDK rte_pause, rte_wait_until_equal, rte_power_pmd_mgmt (empty-poll then pause/umwait/scale)** (rel 2, source-file, BSD-3-Clause (core libs, per DPDK license/README; GitHub reports none)) https://github.com/DPDK/dpdk/blob/main/lib/power/rte_power_pmd_mgmt.c
+  - bottlenecks: P1, P2
+  - Idle ladder keyed on count of empty polls (emptypoll_max): monitor (UMWAIT), pause (TPAUSE/pause loop) or scale (frequency) modes, selectable at run time. Shows a clean way to select a wait mechanism by hardware capability and fall back. UMWAIT/TPAUSE need the WAITPKG CPU flag and are unlikely to be exposed in WSL guests (unverified), so read for structure.
+  - speed claim: none
+  - read: lib/power/rte_power_pmd_mgmt.c: clb_umwait, clb_pause, clb_scale_freq, emptypoll_max, pause_duration, lib/eal/include/generic/rte_pause.h: rte_pause, rte_wait_until_equal_32/64
+- **DPDK rte_ring** (rel 2, library, GitHub shows none; rte_ring is BSD-3-Clause as far as I recall, verify per file) https://github.com/DPDK/dpdk
+  - bottlenecks: P5
+  - Documented head/tail pairs with free-running 32-bit indices, bulk vs burst operations, and selectable single or multi producer and consumer modes per ring. The single-producer path needs no CAS. The programmer's guide ring_lib page is a good write-up of the mechanism. Burst dequeue is relevant to drain-many subscribers.
+  - speed claim: none
+  - read: lib/ring/rte_ring.h and rte_ring_elem_pvt.h, doc/guides/prog_guide/ring_lib.rst
+- **Dakota (UQ, sampling, sensitivity, parameter studies)** (rel 2, tool, LGPL-2.1 (GitHub lists 'other'); ideas only) https://github.com/snl-dakota/dakota
+  - bottlenecks: C12
+  - Reference for study types (LHS, centered/multidim parameter studies, Sobol indices, polynomial chaos) and the black-box 'analysis driver' protocol: it writes a parameters file, calls the simulator, reads a results file. That file protocol is a simple way for SIH to run as a driven function.
+  - speed claim: none
+  - read: docs on interface 'analysis_drivers' and parameter/results file formats (not opened)
+- **Dangling Pointers: analysis of user-space idle instructions on x86 (TPAUSE, UMWAIT, MONITORX)** (rel 2, write-up, web page, no code) https://engineered.at/articles/an-analysis-of-user-space-idle-state-instructions-on-x86-processors
+  - bottlenecks: P1, P2
+  - Summary of a measurement study: timeouts are quantized, there is a floor before the deepest state is entered, and the effect differs between P-cores and E-cores. Warns that these instructions oversleep, so they suit a wait that is also gated by a deadline. Only a 2-minute summary was opened; the underlying paper was not found.
+  - speed claim: Opened summary (Intel Alder Lake, no SKU named): timeout granularity '83 TSC cycles' on P-cores and a floor of about 23,000 TSC cycles before the deepest state. No wake-up latency figures.
+  - read: the page; follow its link to the Dangling Pointers Substack post for the paper
+- **Delta Debugging for CPS with Flaky Test Executions** (rel 2, paper, ) https://arxiv.org/abs/2607.25695
+  - bottlenecks: C13, C12
+  - Gives three delta-debugging variants that use repeated runs and statistical failure analysis to shrink failure-inducing inputs when the simulator is non-deterministic. If SIH is made deterministic the repeated-run part falls away, which is itself an argument for the integrity checks. Read for the list of non-determinism sources.
+  - speed claim: none
+  - read: abstract and the sections on algorithms and non-determinism sources
+- **Differentiable simulators: Nimble Physics, Dojo.jl, TinyDiffSim** (rel 2, physics-engine, TinyDiffSim Apache-2.0; Dojo.jl MIT (https://github.com/dojo-sim/Dojo.jl); Nimble NOASSERTION (https://github.com/keenon/nimblephysics)) https://github.com/google-research/tiny-differentiable-simulator
+  - bottlenecks: P7, C12
+  - Analytic or AD gradients of the step give local sensitivity of any output to any parameter, a cheap first-pass sensitivity analysis (C12). Dojo adds a variational integrator with better energy behavior for the integrator accuracy question. All three confirmed to exist; none read.
+  - speed claim: none
+  - read: TinyDiffSim: examples and the scalar-templated rigid body code (not opened), Dojo.jl: src/integrator folder (not opened)
+- **Dojo (variational integrator)** (rel 2, physics-engine, MIT) https://github.com/dojo-sim/Dojo.jl
+  - bottlenecks: P7
+  - Variational (structure-preserving) integrator with good energy behavior at large steps; relevant to P7 accuracy vs step size. Stale since 2024.
+  - speed claim: none
+  - read: src/ integrator and quaternion handling
+- **Dryden / von Karman turbulence implementations (repos and MIL-F-8785C)** (rel 2, source-file, GPL-3.0 (idea only)) https://github.com/zied-collab404/drone-monte-carlo
+  - bottlenecks: C4, C12
+  - Small example repo of Monte Carlo quadrotor flight with Dryden turbulence and randomized vehicles, in the same spirit as a SIH sweep. Low maturity (few stars, GPL-3.0). The formulas come from MIL-F-8785C, usable from RotorPy's MIT dryden_utils.py instead.
+  - speed claim: none
+  - read: repository root (not read in detail)
+- **Eclipse Cyclone DDS (iceoryx loan path)** (rel 2, library, EPL-2.0 OR EDL-1.0 (BSD-3 style; the EDL route permits adaptation with attribution)) https://github.com/eclipse-cyclonedds/cyclonedds
+  - bottlenecks: P5
+  - Loaned-sample zero-copy write path and a small history cache (whc) and reader history cache (rhc); useful to compare against uORB's queue/generation model. Lower priority than iceoryx2.
+  - speed claim: none
+  - read: src/core/ddsc/src/dds_write.c, src/core/ddsc/src/dds_loaned_sample.c, src/core/ddsc/src/dds_rhc_default.c, src/core/ddsc/src/dds_whc.c
+- **Eclipse ThreadX Linux port (ports/linux/gnu and ports_smp/linux)** (rel 2, runner-or-infrastructure, MIT (Eclipse ThreadX; not confirmed from a header)) https://github.com/eclipse-threadx/threadx/tree/master/ports/linux/gnu/src
+  - bottlenecks: P5, P1
+  - Opened tx_thread_schedule.c. Contrast case. Each ThreadX thread is a pthread, with a baton passed through POSIX semaphores (sem_post on the thread's run semaphore, tx_linux_sem_wait on the global scheduler semaphore) plus signals to suspend and resume threads (_tx_linux_thread_suspend/resume), a separate timer thread and nanosleep in the idle loop. It costs more wake-ups per switch than FreeRTOS's port (several semaphores, signals and sleeps). Mainly a cautionary pattern: signal-based suspend and a sleeping idle loop is what to avoid.
+  - speed claim: none
+  - read: ports/linux/gnu/src/tx_thread_schedule.c: _tx_thread_schedule, _tx_linux_mutex_lock_retry, ports/linux/gnu/src/tx_timer_interrupt.c, ports/linux/gnu/src/tx_thread_system_return.c
+- **Eclipse iceoryx WaitSet** (rel 2, library, Apache-2.0) https://github.com/eclipse-iceoryx/iceoryx/blob/main/iceoryx_posh/include/iceoryx_posh/popo/wait_set.hpp
+  - bottlenecks: P1, P5, P6
+  - Zero-copy shared-memory IPC with a WaitSet (event multiplexer, like epoll over subscribers) built on a semaphore; the same in-process or cross-process notification model uORB needs when several instances (P6) wait on several topics. Design reference for a multi-topic wait and for per-instance shared-memory isolation.
+  - speed claim: none
+  - read: iceoryx_posh/include/iceoryx_posh/popo/wait_set.hpp, iceoryx_posh/source/popo/wait_set.cpp, iceoryx_hoofs semaphore/condition variable data classes
+- **Event-list data structure literature: calendar queue and ladder queue (Fujimoto course slides, Brown 1988)** (rel 2, paper, n/a) https://sigsim.acm.org/conf/mskr/Courseware/Fujimoto/Slides/FujimotoSlides-03-FutureEventList.pdf
+  - bottlenecks: P5
+  - Background for replacing a linear scan of timed waiters when simulated time advances (P5): calendar and ladder queues give near O(1) hold operations; a search result noted that in practice the gain over a binary heap can be small. Hierarchical timing wheels (Varghese and Lauck) were suggested but I found no source and did not open one, so that is a lead only.
+  - speed claim: none
+  - read: https://sigsim.acm.org/conf/mskr/Courseware/Fujimoto/Slides/FujimotoSlides-03-FutureEventList.pdf, https://www.cs.binghamton.edu/~ghyan/papers/mascots06.pdf (HTTP 200, contents not read)
+- **FMPy** (rel 2, tool, BSD-2-Clause (LICENSE.txt read); adaptable with attribution) https://github.com/CATIA-Systems/FMPy
+  - bottlenecks: C11, C12
+  - Reference FMI importer with a simple fixed-step loop (fmpy/simulation.py), input signals applied at given times, output recording to result arrays, and validation against reference results. The input-signal-at-time-t table is a small model for C11, and the compare-to-reference-results flow is a model for C13.
+  - speed claim: none
+  - read: fmpy/simulation.py (simulateCS, input interpolation), fmpy/validation.py (not opened)
+- **Falsification of CPS using Bayesian optimization (paper)** (rel 2, paper, paper) https://arxiv.org/abs/2209.06735
+  - bottlenecks: C12
+  - Reduces the number of expensive simulations needed to find a failure by using surrogate models; supports a 'fewest flights to find a failure' design for sweeps.
+  - speed claim: none
+  - read: abstract; local surrogate model and acquisition function sections
+- **FastFreeze and criu-image-streamer** (rel 2, tool, Apache-2.0 (attribution allowed); criu-image-streamer is also Apache-2.0) https://github.com/twosigma/fastfreeze
+  - bottlenecks: P4, P6
+  - Wrapper that checkpoints/restores an app with CRIU, streaming images through memory instead of disk with low overhead. Shows operational packaging: run an app under a wrapper, cache the image in a store, restore on start. The image streamer is the reusable piece for fast restore of many clones.
+  - speed claim: none
+  - read: src/criu.rs, src/image_streamer.rs, src/store/local.rs, github.com/checkpoint-restore/criu-image-streamer
+- **GGRS (Rust GGPO) with desync detection** (rel 2, library, MIT or Apache-2.0 per its GitHub 'other' label (LICENSE files not opened)) https://github.com/gschup/ggrs
+  - bottlenecks: C13, P4
+  - Modern reimplementation of rollback with periodic checksum exchange for desync detection and a SyncTestSession. Lead only: I confirmed the repo exists and its description but did not read the code. Useful for how often to checksum (interval) without slowing the loop.
+  - speed claim: none
+  - read: src/sessions/sync_test_session.rs, src/sync_layer.rs (checksum handling) - paths from memory, unverified
+- **Gaffer On Games: Deterministic Lockstep and Fix Your Timestep** (rel 2, write-up, Article; ideas only) https://gafferongames.com/post/deterministic_lockstep/
+  - bottlenecks: C13, C14, P7, P2
+  - Definition of determinism as 'exactly the same result', the main causes (floating-point differences across compilers and instruction sets), and the companion Fix Your Timestep article on fixed step with accumulator and interpolation, relevant to variable-step and jitter testing (C14). Background reading, no code to lift.
+  - speed claim: none
+  - read: https://gafferongames.com/post/deterministic_lockstep/, https://gafferongames.com/post/fix_your_timestep/
+- **Gazebo gz-math Rand (process-wide seeded generator)** (rel 2, source-file, Apache-2.0) https://github.com/gazebosim/gz-math/blob/main/src/Rand.cc
+  - bottlenecks: C1
+  - Comparison point and counter-example: a single global std generator, Seed(unsigned) via seed_seq, default from random_device; same global-order problem as SIH. Shows what to avoid, and how a mature stack exposes the seed.
+  - speed claim: none
+  - read: src/Rand.cc: Rand::Seed (lines ~36-44), SeedMutable, RandGenerator
+- **Genesis** (rel 2, physics-engine, Apache-2.0 (README)) https://github.com/Genesis-Embodied-AI/genesis-world
+  - bottlenecks: P3, C12
+  - Claims the fastest GPU stepping, uses auto-hibernation of settled entities and collision-check optimisations. Heterogeneous parallel environments and a domain-randomization example are listed in the catalogue. Mostly a speed reference; mechanism (skip work for settled bodies) has a small analogue for SIH on ground.
+  - speed claim: Developer claim, via the-decoder.com and interestingengineering.com (README not showing the figure when I opened it): 'over 43 million FPS' for one Franka arm on a plane on a single RTX 4090, about 430,000x real time; 10-80x over Isaac Gym/MJX. Simple scene; unverified.
+  - read: README and docs benchmark page, examples/ domain randomization and heterogeneous env examples
+- **Geometric Integration of Quaternions (AIAA 10.2514/1.58558)** (rel 2, paper, journal copyright) https://arc.aiaa.org/doi/10.2514/1.58558
+  - bottlenecks: P7
+  - Lead from the same search, geometric quaternion integration. Not opened beyond the title.
+  - speed claim: none
+  - read: abstract
+- **Go runtime lock_futex.go and spinning-M scheduler** (rel 2, source-file, BSD-3-Clause) https://github.com/golang/go/blob/master/src/runtime/lock_futex.go
+  - bottlenecks: P1, P5
+  - Three-state futex mutex and notesleep/notewakeup built on futexsleep/futexwakeup; the scheduler comment in proc.go documents the invariant 'wake another spinning thread only if none is spinning' to avoid a wake storm, applicable to waking one work-queue thread per step.
+  - speed claim: none
+  - read: src/runtime/lock_futex.go: lock2, unlock2, notesleep, notewakeup, src/runtime/proc.go: header comment on spinning threads (lines ~60-85), wakep()
+- **GuanyaShi/neural_lander_sim_1d** (rel 2, simulator, None declared) https://github.com/GuanyaShi/neural_lander_sim_1d
+  - bottlenecks: C6, C14, C12
+  - A 1-D landing simulator with a learned aerodynamic residual f_a(x,u), a DNN trained on real data (ground effect near landing), plus motor delay and noise. It shows how to plug a small learned residual force into a rigid-body step and how to ship the trained weights (.pth files, plus real flight CSV logs in realdata/) so the model can be checked against data.
+  - speed claim: none
+  - read: 1d_landing_simulator.ipynb, realdata/learning_fa.ipynb, realdata/free_flying_low/*.csv (mavros logs)
+- **Guest halt polling (haltpoll cpuidle) doc** (rel 2, write-up, GPL-2.0) https://docs.kernel.org/virt/guest-halt-polling.html
+  - bottlenecks: P5
+  - Search result summary only, not opened in full. It says the guest polls before halting, with the POLL flag set, so a remote vCPU can skip the wakeup IPI and its VM exit. The max poll window defaults to 200000 ns, and it can pin CPU at 100%. This is a mechanism that targets kernel time on a VM. It is KVM-oriented, and the stock WSL kernel has it disabled (see the config candidate).
+  - speed claim: none
+  - read: docs.kernel.org/virt/guest-halt-polling.html
+- **HPRM: High-Performance Robotic Middleware (arXiv 2412.01799)** (rel 2, paper, paper) https://arxiv.org/abs/2412.01799
+  - bottlenecks: P5, C13, C14
+  - Builds a middleware on Lingua Franca deterministic semantics and couples it to the CARLA simulator, in-memory object store for zero-copy and an eager protocol. Shows what deterministic coordination costs and gains when a simulator is in the loop.
+  - speed claim: Abstract: 'up to 173x lower latency than ROS2 when broadcasting large messages to multiple nodes'; 'In the CARLA autonomous driving application, HPRM attains 91.1% lower latency than ROS2.' Hardware not stated in the abstract. Source: arxiv.org/abs/2412.01799
+  - read: Sections on the LF coordination semantics and the CARLA integration (abstract opened, full text not read)
+- **Hakoniwa drone core** (rel 2, runner-or-infrastructure, custom non-commercial (commercial use prohibited); no text may be copied) https://github.com/toppers/hakoniwa-drone-core
+  - bottlenecks: P5, P6
+  - Shared-memory (mmap) PDU exchange between simulation assets for low-overhead multi-vehicle coupling, a Conductor time-sync node, and a replay directory for flight logs. Useful as evidence for what fixed costs dominate when you split a fleet over processes. License is custom non-commercial, so ideas only.
+  - speed claim: measured per README: 200-aircraft show-runner took 232.65 s wall-clock with 1 process and 135.62 s with 4 processes (about 42% faster, less than the ideal 75% because of shared-memory sync, service init and orchestration); hardware Arm Mac only, confirmed for 100, 128, 200 and 256 aircraft. Latency and jitter listed as planned, not measured.
+  - read: docs/ (fleets, architecture, license notes), src/ and include/ shared-memory PDU code, replay/
+- **How long does it take to make a context switch (Tsuna blog)** (rel 2, write-up, unknown) https://blog.tsunanet.net/2010/11/how-long-does-it-take-to-make-context.html
+  - bottlenecks: P5
+  - Old futex ping-pong measurements with and without pinning; the search summary says pinning cut roughly 3000 ns to 1100-1600 ns on that hardware (I did not open the page; treat as a lead). Code to reproduce is linked from the post.
+  - speed claim: claim from search summary, not opened: about 3000 ns unpinned vs 1100-1600 ns pinned on older Intel CPUs.
+  - read: Post tables and linked context-switch benchmark source
+- **Hyper-V processor performance guidance (virtual processors, SMT, vNUMA)** (rel 2, write-up, Microsoft docs) https://learn.microsoft.com/en-us/windows-server/administration/performance-tuning/role/hyper-v-server/processor-performance
+  - bottlenecks: P5, P6
+  - Official advice: size virtual processors to the workload (do not over-provision), use even vCPU counts with SMT, keep vCPUs and memory in the same vNUMA node. Supports trying processors=4 or 8 in .wslconfig for a single-flight run and pinning one run per SMT pair. Contains no futex or IPI numbers.
+  - speed claim: none
+  - read: 'Virtual processors', 'Virtual NUMA'
+- **IFOSMONDI co-simulation algorithm (Jacobian-free version, PETSc)** (rel 2, paper, ) https://arxiv.org/abs/2101.04485
+  - bottlenecks: P1, C14
+  - Iterative co-simulation with Hermite interpolation of coupling variables (up to third-order hold), no delay, adaptive step. Delay-free alternative to one-tick Jacobi, but it needs rollback, which SIH cannot afford. Useful as a contrast.
+  - speed claim: none
+  - read: Abstract and the Hermite interpolation formulation
+- **INTO-CPS Maestro co-simulation orchestration engine** (rel 2, tool, unknown (GitHub reports no license; check repo before use)) https://github.com/INTO-CPS-Association/maestro
+  - bottlenecks: P1, C11, C14
+  - Fixed-step and variable-step co-simulation orchestrator with Jacobian-based stepping and step-size constraints (bounded difference, zero crossing). Variable-step logic is a model for C14.
+  - speed claim: none
+  - read: interpreter/src/main/java/org/intocps/maestro/interpreter/values/variablestep/StepsizeCalculator.java, maestro/src/test/resources/jacobian.mabl, docs/dev/plugins/fixedstep.rst
+- **Intel UMWAIT / TPAUSE (kernel enumeration patch)** (rel 2, write-up, GPL-2.0 patch) https://git.zx2c4.com/linux-dev/commit/?id=6dbbf5ec9e1e9f607a4c51266d0f9a63ba754b63
+  - bottlenecks: P1
+  - User-level wait instructions: TPAUSE waits until a TSC deadline in a low-power state, and UMONITOR/UMWAIT wake on a write to a watched address. They would let a spin-wait on the actuator-output word sleep in hardware. x86-only and needs the WAITPKG flag, so it is only an opt-in path on a capable host, never the default.
+  - speed claim: none
+  - read: commit message (CPUID.07H:ECX[5] WAITPKG), Intel SDM entries for UMWAIT/TPAUSE
+- **Isaac Gym paper and Isaac Lab** (rel 2, paper, Isaac Lab repo: https://github.com/isaac-sim/IsaacLab (license field NOASSERTION); IsaacGymEnvs archived) https://arxiv.org/abs/2108.10470
+  - bottlenecks: P3, P4, P5
+  - Origin of the pattern of keeping physics and policy buffers on one device and passing tensors directly, so no CPU copy sits in the loop. The analogous move for SIH is to keep the whole simulate-and-control loop in one process with no per-step wakeup between threads.
+  - speed claim: Claim in abstract: '2-3 orders of magnitude improvements' versus CPU simulator training. No hardware given in abstract.
+  - read: abstract and system sections of the paper
+- **Isaac Lab paper** (rel 2, paper, paper) https://arxiv.org/abs/2511.04831
+  - bottlenecks: C12, C3, C6
+  - Describes manager-based environment design including actuator models, sensor noise and randomization as configuration, which is the catalogue-of-variables idea (C12).
+  - speed claim: none
+  - read: Sections on managers, actuators, sensors
+- **Isaac Lab reproducibility and determinism guide** (rel 2, write-up, Docs (Isaac Lab code BSD-3, not verified)) https://isaac-sim.github.io/IsaacLab/main/source/how-to/reproducibility.html
+  - bottlenecks: C1, C13, C12
+  - Documents a practical hazard list: set the seed everywhere, keep physics deterministic mode separate from framework determinism, same hardware and version only, and do not randomise physics materials at runtime on GPU ('only at setup time') because it breaks determinism and stability. Relevant warning for C10 live changes.
+  - speed claim: none
+  - read: the page sections on seeding, --deterministic and per-hardware differences
+- **Isaac Lab reproducibility and determinism guide** (rel 2, write-up, BSD-3-Clause (Isaac Lab core; LICENSE file points to README, not fully checked)) https://github.com/isaac-sim/IsaacLab/blob/bb4d9915f48e0529b6fc5c2982629aed0891b574/docs/source/how-to/reproducibility.rst
+  - bottlenecks: C1, C13, C12
+  - Practical contract in a large robot simulator: same seed, hardware and PhysX version give identical rigid-body results; a single configure_seed call seeds every library; a --deterministic flag; and an explicit finding that an atomically compacted shape list made a BVH order vary between processes (fixed by warp.config.deterministic = RUN_TO_RUN). Example of how parallel construction order leaks into results.
+  - speed claim: none
+  - read: docs/source/how-to/reproducibility.rst, isaaclab/utils/seed.py: configure_seed
+- **Jiffy: wait-free multi-producer single-consumer queue (arXiv 2010.14189)** (rel 2, paper, paper) https://arxiv.org/abs/2010.14189
+  - bottlenecks: P5
+  - Wait-free MPSC queue; relevant because uORB topics have many publishers (multi-instance) feeding one subscriber such as the logger. Algorithm and proof only, memory-frugal.
+  - speed claim: Abstract: 'delivers up to 50% better throughput than the next best construction we compared against, and consumes ~90% less memory', up to 128 threads. Hardware not in the abstract.
+  - read: abstract and evaluation section (only abstract opened)
+- **KUtrace (Richard Sites): kernel-user transition tracing with per-CPU timeline** (rel 2, tool, 3-Clause BSD for the repo LICENSE I read; kernel patches are separately GPL (not checked)) https://github.com/dicksites/KUtrace
+  - bottlenecks: P5, P2
+  - Traces every kernel/user transition and wakeup at nanosecond granularity, with a post-processor that turns raw events into spans and SVG/HTML timelines. The kernel patch (6.1 and 6.6 trees) makes it unsuitable for the stock WSL2 kernel. The BSD-3 post-processing code and its event-to-span model are what to read.
+  - speed claim: The repo describes 'low-overhead tracing'; no figure found or opened.
+  - read: postproc/rawtoevent.cc, postproc/eventtospan3.cc, postproc/kutrace_lib.cc (user-space marks: you can put marks into the SIH step)
+- **Kernel bugzilla 213029: clock_gettime much slower with Hyper-V clocksource driver since 5.12** (rel 2, write-up, n/a) https://lore.kernel.org/platform-driver-x86/bug-213029-215701@https.bugzilla.kernel.org%2F/T/
+  - bottlenecks: P2
+  - Lead only, seen in search results and not opened by me. Reports a vDSO regression for the Hyper-V clocksource, relevant to P2 (gettimeofday per step). Check current_clocksource first: if it is tsc, the issue does not apply.
+  - speed claim: none
+  - read: Thread on lore.kernel.org (not opened)
+- **LCM (lcm_memq in-process provider)** (rel 2, library, LGPL-2.1 (reimplement the idea; do not copy text)) https://github.com/lcm-proj/lcm
+  - bottlenecks: P5
+  - Small C pub/sub with an in-process memq provider (publish enqueues, handle dispatches), and an event-log format. Idea reference for an in-process, no-socket mode; code is LGPL so reimplement only.
+  - speed claim: none
+  - read: lcm/lcm_memq.c, lcm/lcm.c
+- **LGDFuzzer (range specification bugs via learning-guided search)** (rel 2, paper, ) https://arxiv.org/abs/2112.03511
+  - bottlenecks: C12
+  - Learns from logged flights which parameter ranges are risky and guides mutation. Method for sweeping control parameters cheaply. No repository found, so this is a paper-only lead.
+  - speed claim: none
+  - read: arXiv 2112.03511 method and evaluation sections
+- **LGDFuzzer: Control parameters considered harmful (ICSE 2022)** (rel 2, paper, paper) https://doi.org/10.1145/3510003.3510084
+  - bottlenecks: C12
+  - Learning-guided search over drone configuration parameters for range specification bugs; relevant to catalog-and-sweep design for the parameter space. Crossref confirmed the record; the ACM page returned 403 to curl, full text not opened.
+  - speed claim: none
+  - read: paper (ACM DOI 10.1145/3510003.3510084)
+- **LibAFL snapshot modules (libafl_qemu)** (rel 2, library, MIT OR Apache-2.0 (LICENSE-MIT and LICENSE-APACHE both present)) https://github.com/AFLplusplus/LibAFL
+  - bottlenecks: P4
+  - User-mode snapshot module that tracks dirty pages and restores them between runs in emulation; code is permissively licensed so the dirty-page logic can be adapted.
+  - speed claim: none
+  - read: crates/libafl_qemu/src/modules/usermode/snapshot.rs, crates/libafl_qemu/src/emu/snapshot.rs
+- **Lingua Franca (language and docs)** (rel 2, tool, BSD-2-Clause) https://github.com/lf-lang/lingua-franca
+  - bottlenecks: C1, C13
+  - Reactor model argues determinism by construction (logical time, no races on shared state), the counterpart to SIH's current rand() draw order that depends on scheduling. Read the determinism chapters, not the compiler.
+  - speed claim: none
+  - read: docs/ in the repository (not opened), test/C/src for fast-mode tests
+- **Linux Foundation cyclictest docs and NuttX cyclictest** (rel 2, write-up, Apache-2.0 (NuttX docs)) https://nuttx.apache.org/docs/latest/applications/benchmarks/cyclictest/index.html
+  - bottlenecks: P2, P8
+  - The NuttX port of cyclictest lets the same wake-up latency measure be taken on the RTOS that runs on the flight controller boards where SIH is enabled, so any new wait strategy can be checked there too. The Linux Foundation wiki page (HTTP 403 for me) is the usual reference for options. I only saw search summaries.
+  - speed claim: none
+  - read: NuttX docs: applications/benchmarks/cyclictest
+- **Linux PM QoS /dev/cpu_dma_latency** (rel 2, write-up, documentation (GPL-2.0 kernel docs)) https://docs.kernel.org/power/pm_qos_interface.html
+  - bottlenecks: P1, P2
+  - Process holds /dev/cpu_dma_latency open with a small value to keep cores out of deep C-states, removing a wake-up latency component for sleeping threads on bare-metal hosts. Aggregate is the minimum over requesters, needs privilege, and likely has no effect inside a WSL VM (unverified). Candidate run-mode option for lab hosts.
+  - speed claim: none
+  - read: pm_qos_interface.html section on /dev/cpu_dma_latency
+- **Linux ntsync driver (drivers/misc/ntsync.c, /dev/ntsync)** (rel 2, library, GPL-2.0 (idea only)) https://github.com/torvalds/linux/blob/v6.14/Documentation/userspace-api/ntsync.rst
+  - bottlenecks: P5
+  - I confirmed the v6.14 doc. It provides semaphore, mutex and event objects with NTSYNC_IOC_WAIT_ANY (poll()-like, atomically consumes one object) and WAIT_ALL (atomic multi-object acquire). The doc says it is 'a compatibility tool only, and should not be used for general synchronization. Instead use ... futex(2) and poll(2).' The WSL2-Linux-Kernel 6.18 config has '# CONFIG_NTSYNC is not set', so it is unavailable on the stock WSL kernel. Useful here only as a model of kernel-side semantics: an auto-reset event or semaphore as a per-waiter 'your step' token, and WAIT_ALL as an atomic barrier for 'all components finished the step'. Not a candidate for the default path.
+  - speed claim: The doc says ntsync exists because user-space 'cannot match Windows performance while offering accurate semantics'. No figure.
+  - read: Documentation/userspace-api/ntsync.rst, drivers/misc/ntsync.c, include/uapi/linux/ntsync.h, wine dlls/ntdll/unix/sync.c: inproc_wait() near line 428 (picks WAIT_ANY or WAIT_ALL)
+- **Linux perf: lock contention, off-CPU and syscall summary BPF skeletons** (rel 2, source-file, GPL-2.0) https://github.com/torvalds/linux/tree/master/tools/perf/util/bpf_skel
+  - bottlenecks: P5
+  - perf ships in-kernel summaries: lock_contention.bpf.c (perf lock contention), off_cpu.bpf.c (perf record --off-cpu) and syscall_summary.bpf.c (perf trace -s). They are an alternative to bcc that needs no Python toolchain, and the first two help with futex-based lock waits. builtin-kwork.c adds per-work-item latency for kernel work queues. This adds kernel-side evidence for the wakeups that come from locks.
+  - speed claim: none
+  - read: tools/perf/util/bpf_skel/lock_contention.bpf.c, tools/perf/util/bpf_skel/off_cpu.bpf.c, tools/perf/util/bpf_skel/syscall_summary.bpf.c, tools/perf/builtin-lock.c
+- **Linux timerlat tracer and rtla** (rel 2, tool, GPL-2.0) https://github.com/torvalds/linux/blob/master/Documentation/trace/timerlat-tracer.rst
+  - bottlenecks: P2, P3
+  - Like cyclictest but attributes wake-up latency to IRQ vs thread context; shows how to separate timer latency from scheduling latency. Useful to explain why a 100 us sleep returns late on the target host. Linux guest under WSL may lack tracefs access (unverified).
+  - speed claim: none
+  - read: Documentation/trace/timerlat-tracer.rst, tools/tracing/rtla
+- **MAVFI / MAVBench mavfi branch** (rel 2, tool, none reported by GitHub API) https://github.com/harvard-edge/MAVBench/tree/mavfi
+  - bottlenecks: C3, C11
+  - Fault-injection node for a ROS-based UAV benchmark (transient faults / silent data corruption in mission data), with anomaly-detection recovery. Pattern for injecting faults at chosen points in a data pipeline. Built on AirSim/Unreal so little of the runner is liftable.
+  - speed claim: none
+  - read: mavfi branch of the repo, paper: https://arxiv.org/abs/2105.12882
+- **MAVSDK failure plugin and ULog tooling (pyulog, ulog_cpp, flight_review)** (rel 2, library, BSD-3-Clause) https://github.com/mavlink/MAVSDK
+  - bottlenecks: C11, C12
+  - MAVSDK (BSD-3) exposes a failure-injection call over MAVLink usable from a scenario script; pyulog (BSD-3) and ulog_cpp (BSD-3) read results into tables; flight_review (BSD-3) gives per-flight plots. Cheap pieces for the results side of a sweep.
+  - speed claim: none
+  - read: MAVSDK: failure plugin, https://github.com/PX4/pyulog (ulog2csv, ulog_info), https://github.com/PX4/ulog_cpp, https://github.com/PX4/flight_review
+- **MCAP (Foxglove)** (rel 2, library, MIT) https://github.com/foxglove/mcap
+  - bottlenecks: C12, C13
+  - Message-recording container with indexes and chunking, readable by many tools; a candidate format for golden traces and recorded sensor/actuator streams (C13) without inventing one.
+  - speed claim: none
+  - read: docs/specification/ and cpp/mcap
+- **MVSim (MRPT)** (rel 2, simulator, BSD-3-Clause per GitHub. Can adapt with attribution.) https://github.com/MRPT/mvsim
+  - bottlenecks: P5, C9, C11, C14
+  - Lightweight C++ multi-vehicle simulator with pluggable friction models, wheel and drivetrain models, an XML world file, and a Python API. Useful as a model of a small, readable simulator core with scenario files. Paper: arXiv 2302.11033.
+  - speed claim: none
+  - read: modules/simulator/src/World.cpp, modules/simulator/src/Simulable.cpp, modules/simulator/src/FrictionModels/DefaultFriction.cpp, WardIagnemmaFriction.cpp, modules/simulator/src/VehicleBase.cpp
+- **MaksimKovalevskii/LGIMsAccuracy** (rel 2, paper, CC0-1.0 (from gh metadata)) https://github.com/MaksimKovalevskii/LGIMsAccuracy
+  - bottlenecks: P7
+  - Per gh description, compares six rotation-dynamics formulations (Euler parameters and rotation vectors, with and without Lie group RKMK). Lead only: the repo was listed but I did not open its files, so its content and any figures are unverified.
+  - speed claim: none
+  - read: README
+- **MasterSim (ghorwin)** (rel 2, library, BSD-3-Clause) https://github.com/ghorwin/MasterSim
+  - bottlenecks: C14, P5
+  - FMI co-simulation master with step-size control and iteration schemes. Lead only: not opened.
+  - speed claim: none
+  - read: repo root, master algorithm sources (not opened)
+- **Metamorphic Testing in Autonomous System Simulations (paper)** (rel 2, paper, paper) https://arxiv.org/abs/2209.11031
+  - bottlenecks: C13, C12
+  - Metamorphic relations (e.g. same flight under rotated frame or scaled time) can check a simulator change without a ground-truth oracle, an option for integrity checks where golden traces do not exist. Not read beyond the title.
+  - speed claim: none
+  - read: arXiv 2209.11031
+- **MuJoCo-Drones-Gym** (rel 2, simulator, none found (license field null)) https://github.com/tau-intelligence/MuJoCo-drones-gym
+  - bottlenecks: C4, C12
+  - Recent (June 2026) Gymnasium multi-drone env on MuJoCo with an MJX vectorized backend, wind models, domain randomization and a curriculum module; successor to gym-pybullet-drones. Only lead-level: not read beyond the repo description and the abstract.
+  - speed claim: none
+  - read: arXiv 2606.08039 Section 3.6 (MJXVectorAviary), wind and randomization modules in the repo (not opened)
+- **NASA Copilot (Copilot-Language/copilot), generated C step() runtime** (rel 2, tool, not confirmed (SPDX empty). Copilot is generally BSD-3, which I recall but did not verify.) https://github.com/Copilot-Language/copilot
+  - bottlenecks: P5, C13
+  - Compiles stream specs to a C99 monitor with one step() function and no threads or allocation, called once per cycle. Run-to-completion at its smallest, and a runtime-verification layer that could check SIH invariants (golden-trace style). Not opened beyond the repo metadata and file list.
+  - speed claim: none
+  - read: copilot-c99/src/Copilot/Compile/C99/CodeGen.hs
+- **NASA NOS3 (NOS Engine time driver, 42 truth sim)** (rel 2, simulator, GitHub: other (NASA agreement); NOS Engine itself not seen as source) https://github.com/nasa/nos3
+  - bottlenecks: P1, P2
+  - Docs say 42 time is driven through NOS Engine, with a separate time driver sim: an external time master stepping a dynamics sim. The nos_time_driver in the tree is a submodule or empty path, so its mechanism is unread.
+  - speed claim: none
+  - read: sims/nos_time_driver (submodule, not opened), sims/truth_42_sim, https://nos3.readthedocs.io/en/v1_07_02/Architecture.html
+- **NASA TrickHLA** (rel 2, runner-or-infrastructure, NASA Open Source Agreement (GitHub: other)) https://github.com/nasa/TrickHLA
+  - bottlenecks: P1, P6
+  - HLA time management (time-advance request and grant, lookahead) is the formal answer to 'what should a time master wait on'. TrickHLA binds it to a lockstep sim. Not opened beyond existence and file list.
+  - speed claim: none
+  - read: source/TrickHLA/ExecutionControl.cpp, source/TrickHLA/Manager.cpp, source/TrickHLA/ExecutionConfiguration.cpp
+- **NTIA TM-23-565 Gilbert-Elliott burst error parameters** (rel 2, paper, US government report, likely public domain (not verified)) https://its.ntia.gov/publications/download/TM-23-565.pdf
+  - bottlenecks: C3, C14
+  - Maps Gilbert-Elliott two-state Markov parameters to target loss statistics; the telecom answer to 'bursty dropouts'. For SIH sensor and link dropout (GPS outage, mag glitch bursts), a two-state chain with mean burst 1/beta and stationary bad fraction alpha/(alpha+beta) replaces i.i.d. loss, in a few lines of integer code. Only the search-result abstract was seen; PDF returned HTTP 200.
+  - speed claim: none
+  - read: parameter relationship sections and the accompanying software notes
+- **Nav-data/Geomag (C WMM implementation)** (rel 2, library, MIT) https://github.com/Nav-data/Geomag
+  - bottlenecks: C3
+  - MIT C implementation of the full WMM spherical-harmonic model with a bundled WMM2025 file, if full field vectors (not just PX4's tables) are wanted. Probably too large for the default path, but suitable as an opt-in or test reference. The README is inconsistent about its own repo URL.
+  - speed claim: none
+  - read: README.md, geomag.h (geomag_load_model)
+- **NavSenseSim (pabloramesc)** (rel 2, library, MIT) https://github.com/pabloramesc/NavSenseSim
+  - bottlenecks: C2, C3
+  - Airborne sensor noise characterisation and simulation: Allan-variance based IMU model, PSD analysis and a noise-model write-up (docs/noise modeling.pdf). Another readable reference for mapping Allan parameters to generators.
+  - speed claim: none
+  - read: noise/model.py, noise/allan.py, sensors/imu.py, docs/noise modeling.pdf
+- **Netty HashedWheelTimer** (rel 2, library, Apache-2.0) https://github.com/netty/netty/blob/4.1/common/src/main/java/io/netty/util/HashedWheelTimer.java
+  - bottlenecks: P5
+  - Single-level hashed wheel (Varghese-Lauck scheme 6): O(1) insert, each timer keeps a 'remainingRounds' counter, and a worker advances one bucket per tick. Simplest design to reimplement; weakness is per-tick bucket visits, which in a sim means stepping buckets even when empty unless paired with a bitmap. Apache-2.0. The file exists on the default branch (about 35 KB).
+  - speed claim: none
+  - read: HashedWheelTimer.java: Worker.run(), HashedWheelBucket.expireTimeouts(), transferTimeoutsToBuckets()
+- **Neural-Swarm2 (arXiv 2012.05457) and Episodic Koopman landing (arXiv 2004.01708)** (rel 2, paper, Papers) https://arxiv.org/abs/2012.05457
+  - bottlenecks: C6, C8, C7
+  - The arXiv search on multirotor ground effect returned both. Neural-Swarm2 learns inter-vehicle aerodynamic interaction (downwash) and ground effect as residual forces, a template for a general external force input (C8). The Koopman paper identifies ground-effect landing dynamics from data. I read only the titles and the listing.
+  - speed claim: none
+  - read: https://arxiv.org/abs/2012.05457, https://arxiv.org/abs/2004.01708
+- **OMNeT++ RNG manager (rng-N mapping per module)** (rel 2, simulator, Academic Public License (GitHub shows none): reimplement the idea only) https://github.com/omnetpp/omnetpp/blob/master/src/sim/crngmanager.cc
+  - bottlenecks: C1, C12
+  - Lets the configuration file map each module's logical RNG number to an actual generator and seed (num-rngs, **.rng-0 = 1), so noise streams can be pinned or swapped from config. Opened as a file path only, not read.
+  - speed claim: none
+  - read: src/sim/crngmanager.cc, src/sim/cmersennetwister.cc, src/sim/clcg32.cc
+- **OUIDEAS/GE-BEMT** (rel 2, tool, None declared) https://github.com/OUIDEAS/GE-BEMT
+  - bottlenecks: C6, C7
+  - MATLAB blade-element momentum model with ground effect, including a forward-flight Cheeseman variant. Useful offline for generating a ground-effect thrust and torque lookup table for a given prop, which SIH could then evaluate with a small table.
+  - speed claim: none
+  - read: BEMT/GEBEMTThrustForThesis.m, BEMT/CheesemanForwardFlight.m, BEMT/GEBEMTThrustForwardFlight.m
+- **OpenHFT Chronicle Queue** (rel 2, library, Apache-2.0) https://github.com/OpenHFT/Chronicle-Queue
+  - bottlenecks: C12, C13, C11
+  - Memory-mapped append-only log used as event-sourced pub/sub; the replay-from-log pattern maps to replaying a scenario or recorded actuator stream and comparing state hashes. Mechanism only (Java).
+  - speed claim: none
+  - read: src/main/java/net/openhft/chronicle/queue/impl/single/SingleChronicleQueue.java, StoreAppender.java, StoreTailer.java
+- **OpenSBT (search-based testing framework for automated driving)** (rel 2, tool, not checked) https://pypi.org/project/opensbt/
+  - bottlenecks: C11, C12
+  - Pluggable simulator, fitness and search interfaces on top of pymoo, with result tables and plots written per run. Shows how a simulator is wrapped (one run function, one fitness vector) so search algorithms can be swapped. The source repository (git.fortiss.org/opensbt/opensbt-core) did not respond from this machine, so only the PyPI page was confirmed.
+  - speed claim: none
+  - read: PyPI package opensbt; source repo https://git.fortiss.org/opensbt/opensbt-core (unreachable in this pass)
+- **POSIX fork-in-multithreaded-process hazards (pthread_atfork, 'Why threads can't fork')** (rel 2, write-up, blog post, no code) https://thorstenball.com/blog/2014/10/13/why-threads-cant-fork/
+  - bottlenecks: P4, P6
+  - Explains why a plain fork server cannot clone PX4: only the calling thread survives, locks held by other threads (malloc, uORB, work queues) stay locked forever, and the child may only call async-signal-safe functions. Sets the design boundary: fork only before threads exist, or use CRIU/DMTCP which recreate threads.
+  - speed claim: none
+  - read: whole post; POSIX pthread_atfork rationale section
+- **PSY-TaLiRo (and S-TaLiRo) falsification toolbox** (rel 2, tool, not reported by GitLab API) https://gitlab.com/sbtg/pystaliro
+  - bottlenecks: C12, C11
+  - Search-based test generation with robustness-guided optimisers (SciPy based) and pluggable robustness engines (RTAMT, TLTk). Pattern for the optimiser loop and specification interface. The docs site returned 403 to curl; paper arXiv 2106.02200.
+  - speed claim: none
+  - read: repo gitlab.com/sbtg/pystaliro (file layout not opened), arXiv 2106.02200
+- **PX4 PR #27297 native Windows SITL with lockstep timing (closed, not merged)** (rel 2, write-up, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/27297
+  - bottlenecks: P2, P5, P6
+  - Closed attempt that reimplemented lockstep and timing on Windows, so it contains an alternative wait/timer layer. Reason for closure not read, someone should open the thread. Also closed: #20052 offboard actuator setpoints interfere with lockstep, #18512 SITL frequency simulation, #15184 IMU_GYRO_RATEMAX in SITL (issues).
+  - speed claim: none
+  - read: PR #27297 description and review comments for the closure reason, issue #20052
+- **PX4 PR #29241 Zephyr RTOS platform (open) running SIH under QEMU** (rel 2, write-up, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/pull/29241
+  - bottlenecks: P4, P5, C13
+  - Third-party PR maps PX4 onto Zephyr's POSIX API and flies SIH in QEMU; the research note on Zephyr native_sim already covers the idea, this is the PX4-side port. Relevant for a deterministic single-thread time model, not for the default path. Open, do not duplicate.
+  - speed claim: Claim: rate loop runs at 800 Hz on QEMU mps2/an386 (250 MHz Cortex-M4F emulation); not a faster-than-real-time figure.
+  - read: platforms/zephyr (PR file list), porting guide in docs added by the PR
+- **PX4 docs: simulation speed factor guidance (docs.px4.io simulation and sim_sih pages)** (rel 2, write-up, CC-BY-4.0 (PX4 docs; not verified)) https://docs.px4.io/main/en/sim_sih/index
+  - bottlenecks: P3
+  - States PX4_SIM_SPEED_FACTOR for SIH and the COM_DL_LOSS_T scaling rule. Claim from a web search summary of the docs (not opened by me): desktops reach about 6-10x, notebooks 3-4x, written for jMAVSim and Gazebo.
+  - speed claim: Claim (search summary of the developer guide, not opened): powerful desktop machines around 6-10x, notebooks 3-4x; written for jMAVSim and Gazebo, not SIH.
+  - read: docs/en/sim_sih/index.md, docs/en/simulation/index.md speed section
+- **PX4 gz_bridge GZBridge.cpp (clock handling)** (rel 2, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/src/modules/simulation/gz_bridge/GZBridge.cpp
+  - bottlenecks: P1, P2
+  - Own-repo reference: the Gazebo clock callback sets CLOCK_MONOTONIC/REALTIME (px4_clock_settime) from the sim clock. A comparison point for how the SIH thread should publish time.
+  - speed claim: none
+  - read: GZBridge.cpp: clockCallback() lines 474-490, init waiting for clock lines 72-80
+- **PX4 sitl_multiple_run.sh and px4 -i instance option** (rel 2, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/Tools/simulation/sitl_multiple_run.sh
+  - bottlenecks: P6
+  - Current multi-instance launcher: per-instance working dir, px4 -i N, but starts with a global 'pkill -x px4'. Useful as the baseline to replace with per-run directories and leases.
+  - speed claim: none
+  - read: Tools/simulation/sitl_multiple_run.sh lines ~20-37 (pkill -x px4, instance_$n dirs, px4 -i $n)
+- **PX4 unit and fuzz test infrastructure (gtest functional main, google/fuzztest)** (rel 2, tool, BSD-3-Clause (PX4). google/fuzztest is Apache-2.0, from memory.) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/docs/en/test_and_ci/fuzz_tests.md
+  - bottlenecks: C12, C13
+  - The functional-test main starts uORB and params in-process and runs gtest, with optional FUZZ_TEST. The same pattern could drive SIH with randomized inputs (seed, wind, noise) and assertions, with seeds supplied, in 'make tests'. Also docs/en/test_and_ci/sanitizers.md for TSan runs aimed at the multi-thread ordering problems. Not opened: sanitizers.md. google/fuzztest not separately opened.
+  - speed claim: none
+  - read: platforms/posix/src/px4/common/gtest_runner/gtest_functional_main.cpp, docs/en/test_and_ci/fuzz_tests.md (Seeds section), src/drivers/gnss/septentrio/septentrio_fuzz_tests.cpp (the complete example named by the doc), docs/en/test_and_ci/sanitizers.md
+- **PX4/Hawkeye (3D visualizer, ULog replay, swarm test)** (rel 2, tool, BSD-3-Clause) https://github.com/PX4/Hawkeye
+  - bottlenecks: C12, C13, P6
+  - Replaces jMAVSim as the SIH visualizer (PX4 PR #28857). Has ULog replay and a swarm_test.py for multi-vehicle MAVLink. Useful for visual checks of scenario runs and replay, not for speed. Headless runs do not need it.
+  - speed claim: none
+  - read: src/ulog_parser.h and ulog_replay.h, src/mavlink_receiver.h, tests/swarm_test.py
+- **Paul Turner, 'User-level threads... with threads' (LPC 2013), the origin of Google's switchto** (rel 2, paper, Unknown) https://www.linuxplumbersconf.org/2013/ocw/system/presentations/1653/original/LPC%20-%20User%20Threading.pdf
+  - bottlenecks: P5
+  - The original design talk that the FUTEX_SWAP cover letter cites. It explains why cooperative hand-off between kernel threads avoids the scheduler's wake-up path. Read for the argument, not for numbers. I only confirmed the PDF URL answers 200 after redirects and did not read its contents.
+  - speed claim: none
+  - read: whole deck; not read
+- **Pigweed pw_chrono SimulatedSystemClock** (rel 2, library, Apache-2.0 (not confirmed from a header)) https://github.com/google/pigweed/blob/main/pw_chrono/public/pw_chrono/simulated_system_clock.h
+  - bottlenecks: C14, C13
+  - Opened the header. A clock that never ticks by itself and moves only through AdvanceTime or SetTime, injected through the VirtualSystemClock interface. Pigweed also has pw_async2/simulated_time_provider.h, not opened. A small, clean model for making every timeout in a module read an injected clock, which is the structural fix behind P8 and the COM_DL_LOSS_T scaling in P3. Small, with no speed content.
+  - speed claim: none
+  - read: pw_chrono/public/pw_chrono/simulated_system_clock.h, pw_async2/public/pw_async2/simulated_time_provider.h
+- **Pinocchio and rbd-benchmarks** (rel 2, library, BSD-2-Clause (copyable with attribution)) https://github.com/stack-of-tasks/pinocchio
+  - bottlenecks: P7, P5
+  - Cache-friendly templated rigid body algorithms (RNEA, ABA, CRBA) with custom scalar types, and code generation through CppADCodeGen for compiled kernels. For one rigid body this is heavy, but the timing harness and the algorithm layout are a reference for the N-rotor/multibody extension (C7). rbd-benchmarks (MIT, last push 2020) compares libraries.
+  - speed claim: none
+  - read: include/pinocchio/algorithm/aba.hpp, rnea.hpp, benchmark/timings-*.cpp, https://github.com/rbd-benchmarks/rbd-benchmarks
+- **Potato: Data-Oriented Programming 3D Simulator for Swarm Robotics** (rel 2, paper, paper only; no code released at time of reading) https://arxiv.org/abs/2308.12698
+  - bottlenecks: P5, P6
+  - Argues for batching all homogeneous agents as tensors with TorchScript compilation and multiple processes for heterogeneous ones. The paper has no code link, so this is a data-layout argument only; the SIH-relevant takeaway is structure-of-arrays state for many bodies.
+  - speed claim: measured per paper: 0.8452 +/- 0.0196 ms per round for 1,000 quadrotors; flat to 5,000 agents and under 2 ms at 10,000; Intel i7-10700, GTX 1660 SUPER, Ubuntu 20.04 (fastest configuration Python 3.8, PyTorch 1.10.0+cu102).
+  - read: timing table and scaling figure in the paper
+- **Project AirSim (iamaisim)** (rel 2, simulator, MIT) https://github.com/iamaisim/ProjectAirSim
+  - bottlenecks: P3, P7, C6, C7, C11, C14
+  - Has a manual clock step example, 'fastphysics' quad-tilt-rotor PX4 SITL/HITL configs, JSBSim plus PX4 configs, and JSON scene/robot configs that describe a vehicle's actuators in data (rotor.cpp, lift_drag_control_surface.cpp, tilt.cpp). The PX4 integration itself is not in the public tree I listed. Useful for a data-driven vehicle description (C7) and a scenario config format (C11).
+  - speed claim: none
+  - read: client/python/example_user_scripts/clock_manual_step.py, client/python/example_user_scripts/sim_config/robot_quadtiltrotor_fastphysics_px4_sitl.jsonc, core_sim/src/clock.cpp, core_sim/src/actuators/rotor.cpp
+- **PyFME** (rel 2, library, MIT) https://github.com/AeroPython/PyFME
+  - bottlenecks: C7, C11, C14, C5
+  - Flight mechanics engine with environment (ISA atmosphere, wind, gravity), a trimmer, and an input_generator giving step, doublet, ramp and sinusoid control signals with tests: a ready list of canned excitation signals for a scenario layer. Not opened beyond its file list.
+  - speed claim: none
+  - read: src/pyfme/utils/input_generator.py, src/pyfme/utils/trimmer.py, src/pyfme/environment/atmosphere.py and wind.py, src/pyfme/models/euler_flat_earth.py
+- **PyFly (eivindeb) Dryden gust model** (rel 2, library, MIT) https://github.com/eivindeb/pyfly
+  - bottlenecks: C4
+  - Compact MIL-F-8785C Dryden transfer-function set (scale lengths and intensities by altitude and light/moderate/severe) as a readable reference. It uses scipy lti per step, so it is a spec reference, not a speed model.
+  - speed claim: none
+  - read: pyfly/dryden.py: DrydenGustModel.__init__
+- **QEMU VMState descriptions (savevm / migration)** (rel 2, source-file, GPL-2.0; idea only) https://github.com/qemu/qemu/blob/master/include/migration/vmstate.h
+  - bottlenecks: P4, C13
+  - Declarative field tables (VMStateDescription) that drive save and load of every device, with version fields and subsections. A model for a table-driven SIH state registry. Nyx notes flattening this tree for faster device reset.
+  - speed claim: none
+  - read: include/migration/vmstate.h, migration/savevm.c
+- **Quaternion variational integration for inertial maneuvering in a biomimetic UAV (arXiv 2206.09847)** (rel 2, paper, arXiv) https://arxiv.org/abs/2206.09847
+  - bottlenecks: P7
+  - Variational (momentum-preserving) quaternion integrator applied to a UAV, an alternative to forward Euler on omega. Only the page was confirmed to exist (HTTP 200); not read.
+  - speed claim: none
+  - read: abstract, integrator derivation section
+- **Quill and fmtlog (low-latency async loggers)** (rel 2, library, MIT (adaptable with attribution)) https://github.com/odygrd/quill
+  - bottlenecks: P5
+  - Hot-path loggers that push format arguments through per-thread SPSC queues and format on a back-end thread; relevant to the 'logger' part of P5 (ULog writing and uORB copies of logged topics). fmtlog (MengRao/fmtlog, MIT, last push 2025-02-13) is the smaller one.
+  - speed claim: none
+  - read: quill/include/quill/backend and core/ThreadContext (per-thread queue), fmtlog.h in MengRao/fmtlog
+- **Quinchia et al., A Comparison between Different Error Modeling of MEMS Applied to GPS/INS Integrated Systems (Sensors 2013)** (rel 2, paper, open access paper) https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3812568/
+  - bottlenecks: C2
+  - Cited in AirSim's GaussianMarkov.hpp for the discrete first-order Gauss-Markov and random-walk forms (section 3.2). Gives the justification for which stochastic model to use for MEMS bias.
+  - speed claim: none
+  - read: Section 3.2 (Gauss-Markov and random walk discretisation)
+- **RAPTOR foundation policy** (rel 2, library, MIT) https://github.com/rl-tools/raptor
+  - bottlenecks: C7, C12
+  - Trains one policy across thousands of randomly sampled quadrotor geometries and thrust/inertia parameters, built on rl_tools. Likely contains the sampler for generic N-rotor geometry, mass and inertia distributions that C7 and C12 need. Not read.
+  - speed claim: none
+  - read: repository sampler and parameter-distribution code (not opened)
+- **RBDL** (rel 2, library, zlib (LICENSE file says zlib license; copyable with notice)) https://github.com/rbdl/rbdl
+  - bottlenecks: P7, C7
+  - Compact Featherstone implementation (ForwardDynamics via ABA, InverseDynamics via RNEA, CompositeRigidBody) with few dependencies. Smallest code route to a generic articulated model if SIH needs more than one body.
+  - speed claim: none
+  - read: src/Dynamics.cc (ForwardDynamics, InverseDynamics), src/Model.cc
+- **ROS 2 intra-process scalability paper (Luo et al., 2025) and CallbackIsolatedExecutor (arXiv 2505.06546)** (rel 2, paper, unknown) https://scholars.cityu.edu.hk/en/publications/on-the-scalability-and-efficiency-of-intra-process-communication-/
+  - bottlenecks: P5
+  - Reports that in-process messaging cost depends on configuration and workload, and compares executor designs by context-switch and wakeup overhead. Useful for deciding how many work-queue threads SIH-adjacent modules should use. I saw only abstracts in search results, not the full texts.
+  - speed claim: Claim (abstract via a mirror, not opened): per that summary, the callback-isolated executor costs about 1.4x SingleThreaded for inter-process and about 5x for intra-process.
+  - read: Abstract and evaluation sections of both papers; arXiv 2505.06546 for the executor comparison
+- **ROS 2 rclcpp clock and TimeSource (/clock, use_sim_time, jump callbacks)** (rel 2, library, Apache-2.0) https://github.com/ros2/rclcpp/blob/rolling/rclcpp/src/rclcpp/time_source.cpp
+  - bottlenecks: P5, P8, C10, C14
+  - The standard way a sim clock is injected into many nodes. ClocksState attaches clocks, sets all of them when /clock arrives, and handles ros_time_is_active switching and time jump callbacks (a model for what PX4 modules must do when SIH time jumps or pauses, P8). Not a speed lift.
+  - speed claim: none
+  - read: rclcpp/src/rclcpp/time_source.cpp: ClocksState (set_all_clocks, attachClock), rclcpp/src/rclcpp/clock.cpp
+- **RVFuzzer (input validation bugs via control-guided testing)** (rel 2, paper, ) https://www.usenix.org/conference/usenixsecurity19/presentation/kim
+  - bottlenecks: C12, C13
+  - Control-instability detector that runs the real control binary in a simulator and steers parameter and command inputs by observed physical behaviour. Source of a parameter-range catalogue idea. No code release found.
+  - speed claim: none
+  - read: paper sections on the control instability detector and input generation
+- **Redis / KeyDB fork-based snapshot (redisFork)** (rel 2, source-file, KeyDB: BSD-3-Clause. Redis: not permissive since 2024 (RSALv2/SSPL/AGPL per my knowledge; not verified).) https://github.com/Snapchat/KeyDB
+  - bottlenecks: P4
+  - Fork-as-snapshot of a multithreaded server: parent keeps running, child holds a frozen COW copy. KeyDB is multithreaded and still uses it, so it documents the pitfalls (locks held at fork, threads absent in child). Mechanism for keeping a frozen golden copy while the live run continues.
+  - speed claim: none
+  - read: KeyDB src/server.cpp: redisFork (line ~6958), redis src/server.c: redisFork (~7903)
+- **Renode state save/load and reverse execution** (rel 2, simulator, project is MIT per my knowledge; repo API field says 'other', verify LICENSE) https://renode.readthedocs.io/en/latest/basic/saving.html
+  - bottlenecks: P4, C13
+  - Embedded-firmware simulator with whole-emulation Save/Load to a portable file and periodic snapshots for reverse debugging. Useful if SIH-style tests ever run PX4 firmware in an MCU emulator; state files are version-bound.
+  - speed claim: none
+  - read: renode.readthedocs.io/en/latest/basic/saving.html, antmicro.com/blog/2025/12/initial-support-for-reverse-execution-in-renode/
+- **Reproducible AI Requires Reproducible Randomness (arXiv 2609.26461)** (rel 2, paper, n/a) https://arxiv.org/abs/2609.26461
+  - bottlenecks: C1, C13
+  - Argues that the same seed or even the same full internal state may not give identical sequences across implementations, so RNG algorithm, state layout and distribution transforms must be specified. Supports defining SIH's own generator and Gaussian transform instead of libc rand and float Box-Muller. Abstract read only.
+  - speed claim: none
+  - read: abstract; sections on cross-implementation sequence divergence
+- **RflyMAD dataset (arXiv 2311.11340)** (rel 2, paper, unknown) https://arxiv.org/abs/2311.11340
+  - bottlenecks: C3, C12, C13
+  - Multicopter dataset with simulated and real flights covering motor, propeller, accelerometer, gyro, mag, baro and GPS faults plus wind. A catalogue of fault kinds and parameters that reviewers will expect, and labelled data for checking that the new SIH faults look like the real ones. Only the abstract was read.
+  - speed claim: none
+  - read: fault-type table in the paper; RflySim fault module descriptions
+- **RoboFuzz (feedback-driven fuzzing for ROS robots) and the PX4 port** (rel 2, tool, MIT) https://github.com/sslab-gatech/RoboFuzz
+  - bottlenecks: C11, C12
+  - Feedback-driven fuzzer with correctness oracles for robot behaviour; a fork (kugnodz/robofuzz-px4-updated, MIT) adapts it to PX4. Shows how oracles and mutation operators are packaged. ROS-bound.
+  - speed claim: none
+  - read: repo README and fuzzer core (not listed in this pass), https://github.com/kugnodz/robofuzz-px4-updated
+- **RouthSearch (PID range inference by coordinate search)** (rel 2, paper, paper) https://arxiv.org/abs/2505.02357
+  - bottlenecks: C12, P3
+  - Combines an analytic stability bound with coordinate search to cut the number of expensive UAV simulations needed to find valid parameter ranges. Pattern: use cheap analysis to prune before running full simulations.
+  - speed claim: none
+  - read: abstract and search procedure sections (arXiv 2505.02357)
+- **RustedBytes/mavsim (Rust MAVSim with PX4 SITL compatibility)** (rel 2, simulator, BSD-3-Clause) https://github.com/RustedBytes/mavsim
+  - bottlenecks: P1, P2, P3
+  - Small Rust lockstep-capable simulator for PX4 SITL; lead only, not opened beyond existence. Could show a minimal time master loop.
+  - speed claim: none
+  - read: repo root src/ (not listed)
+- **SST (Structural Simulation Toolkit) sst-core sync layer** (rel 2, library, unknown (GitHub reports NOASSERTION, LICENSE not found at the path tried)) https://github.com/sstsimulator/sst-core
+  - bottlenecks: P5, P6
+  - Parallel discrete-event core where the minimum link latency is the lookahead, so ranks and threads run unsynchronized for that long and barrier only at the lookahead boundary. A fixed actuator delay would play the same role as lookahead. Thread barrier files only listed.
+  - speed claim: none
+  - read: src/sst/core/sync/threadSyncDirectSkip.cc, src/sst/core/sync/rankSyncParallelSkip.cc, src/sst/core/sync/syncManager.cc
+- **SST (Structural Simulation Toolkit) sync managers** (rel 2, simulator, BSD-3 expected (GitHub shows 'other'; not read)) https://github.com/sstsimulator/sst-core/tree/master/src/sst/core/sync
+  - bottlenecks: P5, P6
+  - Conservative parallel sync using minimum link latency as the lookahead, with 'Skip' variants (rankSyncParallelSkip, rankSyncSerialSkip) that skip sync windows when no cross-rank traffic can occur. The skip idea fits a stack where most steps have no cross-component message.
+  - speed claim: none
+  - read: src/sst/core/sync/rankSyncParallelSkip.cc, src/sst/core/sync/rankSyncSerialSkip.cc, src/sst/core/sync/ (other sync files, list truncated)
+- **SUMO TraCI / libsumo** (rel 2, simulator, EPL-2.0) https://github.com/eclipse-sumo/sumo
+  - bottlenecks: C10, C11, P4
+  - Runtime control by get/set of typed variables per domain (vehicle, simulation...) between steps, in-process libsumo and socket TraCI with the same API, plus saveState/loadState of whole simulation. In-process versus out-of-process API parity is the same choice SIH has. Only repo existence confirmed.
+  - speed claim: none
+  - read: src/libsumo/Simulation.cpp, src/traci-server/TraCIServer.cpp
+- **SUNDIALS (CVODE/ARKODE rootfinding)** (rel 2, library, BSD-3-Clause) https://github.com/LLNL/sundials
+  - bottlenecks: C11, P7, C14
+  - Production error-controlled integrators with built-in event rootfinding. Reference for tolerance-vs-step-size and for how to stop exactly on an event. Too heavy to embed; read for design of the event bisection.
+  - speed claim: none
+  - read: src/cvode/cvode.c: CVodeRootInit, cvRcheck1/2/3, src/arkode/arkode_root.c
+- **SaFUZZ and HIFuzz (state-aware fuzzing of sUAS on PX4 SITL)** (rel 2, paper, ) https://arxiv.org/abs/2601.05449
+  - bottlenecks: C4, C11, C14
+  - SaFUZZ fuzzes state transitions, failsafes and operator actions 'under various timing conditions and environmental disturbances', and generates fault trees from failures. Gives the list of timing and disturbance axes that field-relevant tests vary. HIFuzz (arXiv 2310.12058, repo Jacob-yen/HiFuzz, no licence) is the companion. No SaFUZZ code found.
+  - speed claim: none
+  - read: SaFUZZ sections on timing and environment mutation, https://arxiv.org/abs/2310.12058
+- **Serenity lock-free Event commit (futex_wake only when state had waiters)** (rel 2, write-up, BSD-2-Clause (SerenityOS)) https://git.rgbcu.be/RGBCube/serenity/commit/32de3ddd33a887c91e845223bd50679f43ed6666
+  - bottlenecks: P1
+  - Compact example of an event with two fast paths: set with no waiters and wait on an already-set event both skip the syscall; futex_wake only if the previous state was 'unset with waiters'. Found in search results, not opened by me.
+  - speed claim: none
+  - read: the commit diff
+- **Shuttle (AWS) and Loom randomised concurrency test schedulers** (rel 2, library, Apache-2.0) https://github.com/awslabs/shuttle
+  - bottlenecks: C1, P5, P8
+  - Seeded random and PCT schedulers that explore thread interleavings, with a failing seed that replays. Related to checking SIH-versus-flight-stack handshakes (actuator wait, lockstep wakeups) for ordering bugs.
+  - speed claim: none
+  - read: shuttle-schedulers/src/random.rs, shuttle/src/rand.rs
+- **SimpleFlight (What Matters in Learning a Zero-Shot Sim-to-Real RL Policy)** (rel 2, write-up, MIT) https://github.com/thu-uav/SimpleFlight
+  - bottlenecks: C6, C12, C14
+  - Ablation study of which sim variables matter for quadrotor sim-to-real: system identification of thrust and motor lag, selective domain randomization, control abstraction (collective thrust and body rates). It tells us which of the C-conditions should be prioritized in a variable catalog and which parameters to expose first. Built on OmniDrones.
+  - speed claim: none
+  - read: arXiv 2412.11764 (five factors, selective domain randomization section), repo config for randomized parameters (not opened)
+- **Snapchange (AWS)** (rel 2, tool, Apache-2.0 (adapt with attribution)) https://github.com/awslabs/snapchange
+  - bottlenecks: P4, P6, C12
+  - KVM snapshot fuzzer where each core resets only modified pages from a shared snapshot; documents the fuzz-function lifecycle (reset, inject input, run, observe) and a cookbook. Lifecycle doc is a good template for a per-run reset contract in SIH.
+  - speed claim: none
+  - read: docs/ARCHITECTURE.md, docs/FUZZ_FUNCTION_LIFECYCLE.md, src/fuzzvm.rs (page reset), docs/COOKBOOK.md
+- **Sola, Quaternion kinematics for the error-state Kalman filter (arXiv 1711.02508)** (rel 2, paper, paper) https://arxiv.org/abs/1711.02508
+  - bottlenecks: P7
+  - Standard reference for exact quaternion integration of constant-rate and piecewise-constant gyro input (closed form, plus 4th-order Runge-Kutta, and trapezoidal variants) with the exponent-map formulas SIH's AxisAngle step already matches. Useful for a documented higher-order option and for cross-checking EKF2-side conventions. I only confirmed the page exists.
+  - speed claim: none
+  - read: Section on integration of the quaternion (closed-form, RK4, mid-point)
+- **Stonefish sensors (IMU, GPS, DVL, Pressure, INS)** (rel 2, simulator, GPL-3.0 (ideas only)) https://github.com/patrykcieslak/stonefish
+  - bottlenecks: C2, C3
+  - Scalar sensor classes with setNoise() and yaw-drift accumulation in the IMU (yaw += accumulated drift), DVL velocity and altitude noise. Small and readable, with the readthedocs page documenting XML-configured noise. An aggregator said it uses random walk and Gauss-Markov models, which I did not confirm. GPL-3.0, ideas only.
+  - speed claim: none
+  - read: Library/src/sensors/scalar/IMU.cpp (setNoise, drift accumulation), Library/include/sensors/scalar/GPS.h, Library/include/sensors/scalar/DVL.h, Library/src/sensors/ScalarSensor.cpp, docs/sensors.rst
+- **Surrealist (UAV test generation from real flights)** (rel 2, tool, MIT) https://github.com/skhatiri/Surrealist
+  - bottlenecks: C12
+  - Baseline generator in the 2024 competition: generates simulation test cases in the neighbourhood of real flight logs. Idea of seeding sweeps from recorded flights fits a SIH replay-and-perturb workflow. Not read in depth.
+  - speed claim: none
+  - read: repository README and source tree (not listed in this pass)
+- **SystemC TLM-2.0 temporal decoupling (tlm_quantumkeeper, global quantum)** (rel 2, library, Apache-2.0) https://github.com/accellera-official/systemc/blob/main/src/tlm_utils/tlm_quantumkeeper.h
+  - bottlenecks: P5, C14
+  - Lets one component run ahead of the global clock by a bounded local time offset and sync only when the offset exceeds the quantum. Gives the vocabulary and code for letting sensor models or logger run ahead of the physics step by a bounded amount instead of syncing every step.
+  - speed claim: none
+  - read: src/tlm_utils/tlm_quantumkeeper.h (inc, need_sync, sync), src/tlm_core/tlm_2/tlm_quantum/tlm_global_quantum.cpp
+- **Tang, Goh, Thng, Ladder queue (ACM TOMACS 2005)** (rel 2, paper, Paper, free to reimplement) https://doi.org/10.1145/1103323.1103324
+  - bottlenecks: P5
+  - Confirmed in Crossref. Multi-tier lazy-sorting structure that fixes the calendar queue's bad behaviour under skewed event distributions. Probably overkill for tens of waiters, so rated low; useful only if the scenario layer (C11) adds many timed events.
+  - speed claim: none
+  - read: Algorithm description: Top, Rungs, Bottom
+- **Time dilation for emulation (DieCast, Gupta et al.)** (rel 2, paper, ) https://www.usenix.org/legacy/event/nsdi08/tech/full_papers/gupta/gupta.pdf
+  - bottlenecks: P3, C14
+  - Lead from memory, URL not opened: scales virtual-machine time by a time dilation factor so a slower host emulates faster hardware and networks. The idea (scale the clock seen by the stack, not the physics) matches how PX4_SIM_SPEED_FACTOR works but with all timeouts scaled consistently, which bears on P3.
+  - speed claim: none
+  - read: 
+- **TinyDiffSim** (rel 2, physics-engine, Apache-2.0) https://github.com/erwincoumans/tiny-differentiable-simulator
+  - bottlenecks: P7, P5
+  - Header-only rigid body simulator templated over scalar type, so one code path runs in float, double or autodiff. Template pattern lets SIH select float/double for the integrator without code duplication.
+  - speed claim: none
+  - read: src/ (header-only dynamics: forward_dynamics.hpp, rigid_body.hpp)
+- **TinyOS TOSSIM discrete-event core** (rel 2, simulator, GitHub reports none; TinyOS files normally carry BSD-style headers. Verify per file.) https://github.com/tinyos/tinyos-main/tree/master/tos/lib/tossim
+  - bottlenecks: P3, P5, C14
+  - Confirmed to exist and the file list read, but the source not opened. A simulator for an embedded OS that runs the real OS code inside a host process with a heap-based event queue (sim_event_queue.c, heap.c): time jumps from event to event, with no sleeping and no threads. It is the classic form of 'virtual time with a priority queue' for an embedded stack. Worth a deeper read as a model for an SIH-wide event queue with sensor and actuator latency events (C14).
+  - speed claim: none
+  - read: tos/lib/tossim/sim_event_queue.c, tos/lib/tossim/heap.c, tos/lib/tossim/sim_tossim.c: runNextEvent
+- **Tracy Profiler (sched_waking capture, context-switch tracks)** (rel 2, tool, BSD-3-Clause (GitHub API reports NOASSERTION; I did not read the LICENSE file)) https://github.com/wolfpld/tracy
+  - bottlenecks: P5, P1
+  - Its Linux system tracer reads sched_waking from tracefs (TracySysTrace.cpp ~lines 907-947 and ~1687-1702) and queues ThreadWakeup items. It shows wakeups beside the instrumented zones in the same timeline, so an in-process zone like 'SIH step' can be lined up against wakes. I read only the wakeup lines: it appears to record the wakee thread, time and CPU; I did not find the waker id being kept, so check before relying on it for edges.
+  - speed claim: none
+  - read: public/client/TracySysTrace.cpp lines ~900-950 (sched_waking setup) and ~1680-1710 (ThreadWakeup queue item)
+- **Trampoline RTOS (OSEK/AUTOSAR OS schedule tables)** (rel 2, library, GPL-2.0 (confirmed with gh): idea only) https://github.com/TrampolineRTOS/trampoline
+  - bottlenecks: P5, C11, C14
+  - Statically configured OSEK/AUTOSAR OS with schedule tables: expiry points at fixed offsets within a cyclic table, which fire tasks or events. The OSEK time-triggered model (offset, period, task) is the canonical form of a 'scenario at an exact tick' table. Search results indicate it is the open implementation to read; I opened only the file list.
+  - speed claim: none
+  - read: os/tpl_os_timeobj_kernel.c and .h (time objects, schedule table expiry points), os/tpl_os_kernel.c
+- **UMONITOR/UMWAIT/TPAUSE (x86 WAITPKG user-level wait)** (rel 2, write-up, n/a) https://www.laruence.com/x86/UMWAIT.html
+  - bottlenecks: P1, P2
+  - A hardware way to wait on a shared-memory flag without a syscall and without a busy loop; a store to the monitored line wakes the core. Only usable on CPUs that report CPUID.7.0:ECX.WAITPKG, and not available on ARM flight controllers or under many hypervisors (KVM raises #UD if not exposed), so it can only be an optional SITL fast path. No measured latency comparison found.
+  - speed claim: none
+  - read: Intel SDM entries for UMONITOR and UMWAIT, https://lkml.iu.edu/hypermail/linux/kernel/1806.1/05490.html (kernel enumeration patch)
+- **UQpy, chaospy, OpenTURNS, SMT, Dakota (uncertainty quantification suites)** (rel 2, library, MIT (UQpy, chaospy); BSD-3 (SMT); LGPL/NOASSERTION (OpenTURNS, Dakota: ideas only)) https://github.com/SURGroup/UQpy
+  - bottlenecks: C12
+  - UQpy (MIT) includes subset simulation and importance sampling for rare-failure probabilities; chaospy (MIT) does polynomial chaos surrogates; SMT (BSD-3) does LHS and surrogates; OpenTURNS (LGPL) and Dakota (github.com/snl-dakota/dakota, licence not determined, see src/LHSDriverAdapter.cpp) are the large reference suites with reliability methods. Pattern: estimate a small failure probability with far fewer flights than plain Monte Carlo. Dakota's driver/analysis-file coupling is the model for loosely coupled runs.
+  - speed claim: none
+  - read: UQpy: SURGroup/UQpy subset simulation and sampling modules, https://github.com/jonathf/chaospy, https://github.com/SMTorg/smt, https://github.com/snl-dakota/dakota
+- **Unity ML-Agents environment parameters and samplers** (rel 2, library, Apache-2.0) https://github.com/Unity-Technologies/ml-agents
+  - bottlenecks: C12, C10
+  - A side channel that pushes named float parameters into a running simulation, plus a config-driven manager that samples them per episode (uniform, gaussian, multi-range uniform) with curriculum. It is the simplest API form of 'catalogue of variables, sampler per variable, push at reset'. Apache-2.0.
+  - speed claim: none
+  - read: ml-agents-envs/mlagents_envs/side_channel/environment_parameters_channel.py, ml-agents/mlagents/trainers/environment_parameter_manager.py, ml-agents-envs/mlagents_envs/side_channel/engine_configuration_channel.py (time scale control)
+- **Unity.Mathematics Random (hash-seeded small-state generator, per-entity streams)** (rel 2, source-file, Unity Companion License (GitHub NOASSERTION): reimplement only) https://github.com/Unity-Technologies/Unity.Mathematics/blob/master/src/Unity.Mathematics/random.cs
+  - bottlenecks: C1, C12
+  - A 32-bit xorshift generator whose constructor hashes the seed (so seed 1,2,3 are decorrelated) and is designed to be built per entity per job; the documentation covers per-thread/per-entity seeding in parallel jobs. Light pattern for 4-byte-state generators on MCUs. File not read.
+  - speed claim: none
+  - read: src/Unity.Mathematics/random.cs: Random.CreateFromIndex, ctor hash, src/Documentation~/random-numbers.md
+- **Verilator (threaded eval, seed-controlled randomization)** (rel 2, simulator, LGPL-3.0 or Artistic-2.0 (GitHub shows 'other'; verify)) https://github.com/verilator/verilator
+  - bottlenecks: P5, C1
+  - Compiles a model into a tight eval loop; multithreaded mode uses a worker pool with a static schedule and spin-based synchronization; model randomization is seed-controlled via runtime plusargs. Pattern for a statically partitioned per-step schedule and one seed that controls all initial randomization. Not read.
+  - speed claim: none
+  - read: include/verilated_threads.h and .cpp, include/verilated_random.cpp, include/verilated_timing.cpp, https://veripool.org/guide/latest/verilating.html
+- **Webots Fluid and ImmersionProperties (streamVelocity, density, drag)** (rel 2, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/docs/reference/fluid.md
+  - bottlenecks: C4, C5
+  - A Fluid has density, viscosity and a streamVelocity vector; immersed solids get buoyancy and drag from relative velocity. Same structure as atmosphere plus wind: a medium object with density and velocity that feeds a drag computation on relative velocity. Useful as a schema for a SIH atmosphere/wind object (density, wind vector, later gradients). I read the docs only; the force code (ODE immersion in src/ode, WbSolid) was not opened.
+  - speed claim: none
+  - read: docs/reference/fluid.md, docs/reference/immersionproperties.md, src/webots/nodes/WbFluid.cpp
+- **Webots physics plugin hook: WbPhysicsPlugin (webots_physics_step, custom forces)** (rel 2, source-file, Apache-2.0) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/plugins/WbPhysicsPlugin.cpp
+  - bottlenecks: C8, C11
+  - Lead only, file not opened: user-loaded shared library called every physics step before and after the ODE step (mPhysicsPlugin->step() and stepEnd() in WbSimulationWorld::step) with access to bodies, to inject forces. The idea for SIH is a compile-time or optional hook list called at fixed points in the tick (pre-force, post-integrate) for disturbances, with the default empty and costing nothing.
+  - speed claim: none
+  - read: WbPhysicsPlugin.cpp, docs/reference/physics-plugin.md (not opened)
+- **Webots step/collision overlap: WbSimulationCluster using dWorldStepAndSpaceCollide** (rel 2, source-file, Apache-2.0 (Webots) with ODE BSD/LGPL dual license in src/ode) https://github.com/cyberbotics/webots/blob/33f4a749b9db62a54e50ec1f56ed039e796181a6/src/webots/engine/WbSimulationCluster.cpp
+  - bottlenecks: P5, C9
+  - The cluster calls Webots' patched ODE entry dWorldStepAndSpaceCollide(space, nearCallback, world, dt, &dWorldStep, spaceUpdateFunc), which runs collision for the next step concurrently with the world step. Ground contact (C9) is the relevant part for SIH, and the overlap idea is minor for a single body. Not read beyond the call site.
+  - speed claim: none
+  - read: WbSimulationCluster.cpp lines ~90-125 (dSpaceCollide, dWorldStepAndSpaceCollide)
+- **Woodman, An introduction to inertial navigation (Cambridge UCAM-CL-TR-696)** (rel 2, paper, tech report) https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-696.pdf
+  - bottlenecks: C2
+  - Standard short derivation of how white noise, bias instability and random walk propagate through integration, with Allan variance, so one can predict EKF drift rate from model parameters (a sanity check for a test that a new IMU model changed behaviour by the expected amount).
+  - speed claim: none
+  - read: Chapter on error characterisation and Allan variance
+- **ZJU-FAST-Lab/Ground-effect-controller** (rel 2, write-up, GPL-3.0 (but no code in the repo)) https://github.com/ZJU-FAST-Lab/Ground-effect-controller
+  - bottlenecks: C6, C12
+  - Supplementary material for a ground-effect-aware multicopter modelling and control paper. The repo has only CAD files, figures and a README with firmware download links (a PX4-style CUAV V5 setup with a laser rangefinder). It holds no source code. It is mainly a pointer to the paper and the data, and the experimental setup could guide validation of a ground-effect model.
+  - speed claim: none
+  - read: README.md, section 5 (control algorithm data), figs/traj_rmse_plot.pdf
+- **Zenoh shared-memory provider (zenoh-shm)** (rel 2, library, EPL-2.0 or Apache-2.0 (LICENSE file lists both; the Apache-2.0 option allows adapting with attribution)) https://github.com/eclipse-zenoh/zenoh
+  - bottlenecks: P4, P5, P6
+  - Ideas rather than code: a watchdog/confirmator scheme that reclaims chunks when a process dies, and 'page pre-commit' (lock shared buffers in RAM before handoff so first-access page faults cannot spike latency). The pre-commit idea applies to per-run boot cost and jitter. A Zenoh 1.10 post describes a provider you can wait on instead of polling. Too heavy to embed.
+  - speed claim: Claim (secondhand, a learn.arm.com page seen in a search result, not opened): enabling SHM cut mean ROS 2 camera-message latency from about 9.3-10.2 ms to 6.3-7.4 ms against TCP loopback, at about 247 MB of /dev/shm. A forum post claims 5 us / 67 Gbps in a network test, setup unconfirmed.
+  - read: commons/zenoh-shm/src/watchdog/confirmator.rs, validator.rs, periodic_task.rs, commons/zenoh-shm/src/header/chunk_header.rs, commons/zenoh-shm/src/api/provider/shm_provider.rs
+- **aerorobotics/neural-fly** (rel 2, tool, None declared, so ideas and data use need the authors' permission) https://github.com/aerorobotics/neural-fly
+  - bottlenecks: C4, C6, C12
+  - Training scripts, training data and experimental data for Neural-Fly (learned wind-dependent aerodynamic residual). The data are real flights under varied wind speeds, which gives a ground truth for checking a simulator's wind and drag terms. Not ground effect specifically.
+  - speed claim: none
+  - read: README.md; the data folder and the training scripts (not opened)
+- **allantools** (rel 2, tool, LGPL-3.0) https://github.com/aewallin/allantools
+  - bottlenecks: C2, C13
+  - Python implementation of Allan, modified Allan, Hadamard and other deviations, with noise generators (noise.py). Useful for the offline check that generated noise has the intended Allan slopes. LGPL-3.0, so use as a tool, do not copy text.
+  - speed claim: none
+  - read: allantools/allantools.py, allantools/noise.py (not opened; path assumed)
+- **awesome-space-systems-simulation (aoezhb)** (rel 2, write-up, NOASSERTION) https://github.com/aoezhb/awesome-space-systems-simulation
+  - bottlenecks: 
+  - Curated list of open space-simulation tools. Found, not read: a source of further leads for another agent.
+  - speed claim: none
+  - read: README
+- **bsk-ros2-bridge and paper arXiv:2512.09833** (rel 2, tool, BSD-3-Clause) https://github.com/DISCOWER/bsk-ros2-bridge
+  - bottlenecks: P2, P1
+  - Couples Basilisk to an external ROS 2 controller at run time. Worth reading for how it paces and synchronizes an external consumer against sim time (the paper abstract says real-time, bidirectional). Not opened beyond metadata.
+  - speed claim: none
+  - read: repo README and bridge node sources, https://arxiv.org/abs/2512.09833
+- **buggy_drone (Hypothesis-driven fuzzing of a small drone sim with trace oracle)** (rel 2, tool, none stated) https://github.com/iotrustlab/buggy_drone
+  - bottlenecks: C12, C13
+  - Small example of generators from Hypothesis, a runner harness and a trace oracle against a lightweight drone simulation with 'reduced execution pipelines'. Shows how little glue a property-based sweep needs. Read before trusting; tiny project.
+  - speed claim: none
+  - read: scrbe_fuzzer/generator/hypothesis_driver.py, scrbe_fuzzer/harness/runner.py, scrbe_fuzzer/oracle/trace_oracle.py, formalization.md
+- **colorednoise (felixpatzelt)** (rel 2, library, MIT) https://github.com/felixpatzelt/colorednoise
+  - bottlenecks: C2, C12
+  - Generates 1/f^beta (pink, flicker) noise by spectral shaping, for building bias-instability / flicker components that Gauss-Markov alone cannot give. Offline Python, so useful for generating reference series to validate a cheap on-line filter-based flicker approximation. MIT.
+  - speed claim: none
+  - read: colorednoise.py (powerlaw_psd_gaussian)
+- **criu-image-streamer** (rel 2, tool, Apache-2.0 (adapt with attribution)) https://github.com/checkpoint-restore/criu-image-streamer
+  - bottlenecks: P4, P6
+  - Streams CRIU images through a pipe instead of disk, so restore can start while the image is still arriving; relevant when launching many parallel instances from one image.
+  - speed claim: none
+  - read: README.md and src/ (not opened)
+- **crossbeam-utils Backoff (Rust)** (rel 2, source-file, MIT or Apache-2.0) https://github.com/crossbeam-rs/crossbeam/blob/master/crossbeam-utils/src/backoff.rs
+  - bottlenecks: P2
+  - Documented split between spin() (for CAS retry, SPIN_LIMIT 6) and snooze() (waiting for another thread, yields after step 6, 'is_completed' at YIELD_LIMIT 10, then caller should block). Good doc on when to spin vs when to park.
+  - speed claim: none
+  - read: crossbeam-utils/src/backoff.rs: spin(), snooze(), is_completed()
+- **disruptor-rs (nicholassm) wait strategies** (rel 2, library, MIT (adaptable with attribution)) https://github.com/nicholassm/disruptor-rs/blob/08b469143ac8e2db9bdc7c1aba0b143fefd25807/src/wait_strategies.rs
+  - bottlenecks: P1
+  - Compact Rust trait with BusySpin, BusySpinWithSpinLoopHint and Sleep. Small example of making the wait policy a type parameter so default builds pay nothing.
+  - speed claim: none
+  - read: src/wait_strategies.rs
+- **drone-models (LSY)** (rel 2, library, none found (license field null)) https://github.com/learnsyslab/drone-models
+  - bottlenecks: C6, C7
+  - Symbolic (CasADi) and numeric (NumPy, JAX) physics-based and data-driven quadrotor models with identified parameter sets for several Crazyflie variants and an x500 (shared with Crazyflow). Source of fitted motor-lag and thrust parameters and of an identification workflow (crazyflow/dynamics/utils/identification.py) for filling in per-motor curves.
+  - speed claim: none
+  - read: repository model modules (not opened), crazyflow/dynamics/utils/identification.py
+- **escapement (allocation-free timing wheel for C99, POSIX, bare-metal)** (rel 2, library, none stated (idea only)) https://github.com/ydah/escapement
+  - bottlenecks: P5
+  - Allocation-free wheel aimed at bare-metal, which matches the flash- and heap-limited boards that enable SIH. The licence field is empty, so treat it as 'idea only' until a licence file is found. 1 star, young project, low confidence in quality.
+  - speed claim: none
+  - read: Repository root; locate the wheel core
+- **folly LifoSem** (rel 2, library, Apache-2.0) https://github.com/facebook/folly/blob/main/folly/synchronization/LifoSem.h
+  - bottlenecks: P5, P6
+  - Semaphore with approximately LIFO wake order so the most recently parked (cache-warm) thread is woken first; idle workers stay parked. Useful pattern for the work-queue wake storm and for a pool of parallel-run workers (P6). Heavier than SIH needs, so read for the handoff design only.
+  - speed claim: none
+  - read: folly/synchronization/LifoSem.h: LifoSemHead, LifoSemBase::post/wait/tryWait, shutdown()
+- **folly detail/Sleeper (spin then sleep ladder)** (rel 2, source-file, Apache-2.0) https://github.com/facebook/folly/blob/main/folly/synchronization/detail/Sleeper.h
+  - bottlenecks: P2
+  - Backoff ladder: up to 4096 pause iterations then sleep_for(500 us); on AArch64 the spin count doubles each call. Shows a bounded active spin followed by coarse sleep, a reference for choosing the usleep fallback.
+  - speed claim: none
+  - read: folly/synchronization/detail/Sleeper.h: wait(), kMaxActiveSpin, kMinYieldingSleep
+- **gVisor state-save/restore (pkg/state)** (rel 2, library, Apache-2.0 (adapt with attribution)) https://github.com/google/gvisor/tree/master/pkg/state
+  - bottlenecks: P4, C13
+  - A generated, annotation-driven save/restore of an entire kernel's object graph (stateify) with explicit 'do not save' fields and restore hooks. Pattern: annotate which fields are state, which are derived, and regenerate. For C++ SIH this means an explicit state list rather than raw memory dump. Catalyzer was built on gVisor per the paper.
+  - speed claim: none
+  - read: pkg/state/encode.go and decode.go, pkg/sentry/state/state.go
+- **gem5 event queues and global barrier events** (rel 2, simulator, BSD-3-Clause) https://github.com/gem5/gem5/blob/stable/src/sim/global_event.cc
+  - bottlenecks: P5, P6
+  - Multi-event-queue parallel mode: each thread owns an event queue and they meet at a GlobalSimExit/barrier event every quantum; BarrierEvent releases the queue lock before the barrier and runs the global action once per barrier. Good, license-compatible reference for a barrier that is cheap when only one thread has work.
+  - speed claim: none
+  - read: src/sim/global_event.cc: BarrierEvent, ProcessBarrier, src/sim/eventq.cc and eventq.hh, src/sim/simulate.cc
+- **gz-physics (Gazebo physics plugin interface)** (rel 2, library, Apache-2.0 (copyable with attribution)) https://github.com/gazebosim/gz-physics
+  - bottlenecks: C7, C11
+  - Defines a FeatureList: each backend declares which capabilities it supports (for example force/torque application, joint control, simulation step), and callers query features instead of linking an engine. A pattern for letting SIH keep a built-in minimal model while an optional heavier model plugs in under the same interface.
+  - speed claim: none
+  - read: include/gz/physics/FeatureList.hh, include/gz/physics/FeaturePolicy.hh, dartsim/src/SimulationFeatures.cc
+- **hector_gazebo_plugins SensorModel_ (offset, drift, drift_frequency, gaussian_noise, scale_error)** (rel 2, library, not detected by GitHub (check file headers before copying)) https://github.com/tu-darmstadt-ros-pkg/hector_gazebo
+  - bottlenecks: C2, C3
+  - A five-field templated sensor error struct (offset, drift, drift_frequency, gaussian_noise, scale_error) with one apply operator that works for scalars or vectors, reused for IMU, GPS, magnetic and baro plugins. A compact way to give every sensor channel the same knob set.
+  - speed claim: none
+  - read: hector_gazebo_plugins/include/hector_gazebo_plugins/sensor_model.h, hector_gazebo_plugins/src/gazebo_ros_imu.cpp, hector_gazebo_plugins/src/gazebo_ros_gps.cpp
+- **jMAVSim sensors (Sensors.java, SimpleSensors.java, LogPlayerSensors.java)** (rel 2, simulator, BSD-3-Clause) https://github.com/PX4/jMAVSim
+  - bottlenecks: C2, C3, C14
+  - PX4's earlier lightweight simulator with a sensor class and a log-player that replays recorded sensor data, which is the replay idea (C12/C13). BSD-3-Clause, so copyable. Not opened beyond the file list.
+  - speed claim: none
+  - read: src/me/drton/jmavsim/SimpleSensors.java, src/me/drton/jmavsim/Sensors.java, src/me/drton/jmavsim/LogPlayerSensors.java
+- **joinframework/queue-benchmark** (rel 2, tool, MIT (adaptable with attribution)) https://github.com/joinframework/queue-benchmark
+  - bottlenecks: P5
+  - Compares Boost, moodycamel, rigtorp and a custom queue for throughput, latency and bulk operations on Linux. Useful as a template for a microbenchmark of uORB publish/notify alone. Its own caveat: both sides run in one process, so shm numbers do not reflect real inter-process transfer.
+  - speed claim: Claim (secondhand from a search summary, not opened): round-trip mean 126-180 ns across the queues, same-process, hardware not seen.
+  - read: README.md and the benchmark source for the round-trip method
+- **kalibr_allan (rpng)** (rel 2, tool, none detected (ideas only)) https://github.com/rpng/kalibr_allan
+  - bottlenecks: C2, C13
+  - Matlab/ROS scripts that turn a static IMU log into noise density and bias random walk in Kalibr units, with a 4-hour recording example in its README. Useful for calibrating SIH defaults to a real board's IMU. No license is stated, so ideas only.
+  - speed claim: none
+  - read: README.md, scripts/ (Allan plot and fit)
+- **kegiljarhus/pyBEMT** (rel 2, tool, MIT) https://github.com/kegiljarhus/pyBEMT
+  - bottlenecks: C6, C7
+  - A small MIT-licensed blade element momentum code for propellers. I saw only the listing entry, not the source. It can build thrust and torque against RPM and advance-ratio tables for a specific prop, a data-driven alternative to a single thrust and torque coefficient, evaluated as a table in SIH.
+  - speed claim: none
+  - read: Not opened. Start with the repo README and the main solver module.
+- **ledav-net/logger-thread (conditional futex wake pattern)** (rel 2, library, MIT) https://github.com/ledav-net/logger-thread
+  - bottlenecks: P5
+  - A search result, not tracing. A threaded logger with a per-thread circular buffer, 'futex and atomics to sleep and wake up when needed'. It illustrates the wake-only-if-the-consumer-is-asleep rule, the usual way to remove a wake edge once the graph shows it (relevant to the PX4 logger, which the brief says is a large wake source). I only read the one-line description.
+  - speed claim: none
+  - read: README and the wait/wake code
+- **libfaketime** (rel 2, tool, GPL-2.0 (idea only, no text may be copied)) https://github.com/wolfcw/libfaketime
+  - bottlenecks: P3, C10
+  - LD_PRELOAD time interposition with offset, 'start at' and a speed multiplier ('+0 x2'), a cache for fake time (FAKETIME_NO_CACHE trade-off), and runtime reconfiguration through FAKETIME_TIMESTAMP_FILE. Useful as an external fallback to test whether PX4 workers read wall-clock time outside the simulated clock; it does not provide lockstep. README warns Go, Python, JVM and jemalloc runtimes cache time.
+  - speed claim: none
+  - read: README sections 4c, 4d, speed-up (x), FAKETIME_NO_CACHE, src/libfaketime.c (fake_clock_gettime and the cache path)
+- **lmbench (lat_ctx, lat_pipe, lat_unix)** (rel 2, tool, GPL-2.0) https://github.com/intel/lmbench
+  - bottlenecks: P5
+  - Standard context-switch and pipe latency tools, as used in the multikernel table above. Run in the same WSL2 VM for comparable numbers. Contents not read.
+  - speed claim: none
+  - read: src/lat_ctx.c, src/lat_pipe.c
+- **moodycamel ReaderWriterQueue** (rel 2, library, Simplified BSD or Boost licence (dual) plus zlib semaphore (adaptable with attribution; GitHub reports NOASSERTION, see LICENSE.md)) https://github.com/cameron314/readerwriterqueue
+  - bottlenecks: P1
+  - SPSC queue with a blocking variant built on the same semaphore, tested widely; second reference for the SPSC plus blocking wake pattern.
+  - speed claim: none
+  - read: readerwriterqueue.h, atomicops.h (semaphore)
+- **mpdn/radix-heap** (rel 2, library, MIT) https://github.com/mpdn/radix-heap
+  - bottlenecks: P5
+  - Radix heap, a monotone priority queue (valid because lockstep time never goes backwards); same bucket-by-highest-differing-bit idea as Seastar timer_set, with the theory and benchmarks attached. MIT. Use as a second reference for the structure.
+  - speed claim: none
+  - read: src/lib.rs: RadixHeapMap push/pop and bucket redistribution
+- **mutouyun/cpp-ipc** (rel 2, library, MIT (adaptable)) https://github.com/mutouyun/cpp-ipc
+  - bottlenecks: P5, P6
+  - Shared-memory IPC with broadcast as the default mode and selectable producer/consumer combinations in one template; shows how to build several channel types over one ring. Benchmark data is in performance.xlsx, which I did not open.
+  - speed claim: none
+  - read: include/libipc/ipc.h, src/libipc/circ/ (circular buffer, path assumed, not verified), performance.xlsx
+- **ns-3 attribute system and Config paths** (rel 2, write-up, not verified here (believed GPL-2.0, idea only)) https://www.nsnam.org/docs/manual/html/attributes.html
+  - bottlenecks: C12, C10, C11
+  - Every tunable is an Attribute registered with name, type, default, range and help text; Config::Set can change by path or wildcard, and Simulator::Schedule(time, fn) runs a change at an exact simulated time. Model for the C12 catalog of all variables and for scheduling a change. Doc page confirmed by HEAD only; repo licence is GPL-2.0 per my memory and was not verified, so treat as idea only.
+  - speed claim: none
+  - read: doc: Attributes and Config chapters of the ns-3 manual, src/core/model/attribute.h, config.cc, simulator.h (Schedule)
+- **ns-3 schedulers (calendar, heap, map, list, priority-queue)** (rel 2, library, GPL-2.0 (idea only)) https://github.com/nsnam/ns-3-dev-git/tree/master/src/core/model
+  - bottlenecks: P5, C14
+  - Pluggable scheduler interface with five interchangeable event-set implementations, including CalendarScheduler with ResizeUp/ResizeDown. The runtime-selectable-scheduler design (one abstract Scheduler, several implementations, benchmarked against each other) is the pattern to lift for testing deadline structures against the existing linked list. GPL-2.0 (copyright INRIA header seen), so reimplement only.
+  - speed claim: none
+  - read: src/core/model/scheduler.h (interface), calendar-scheduler.cc: DoInsert, DoRemoveNext, Resize, default-simulator-impl.cc: main Run() loop
+- **nsjail** (rel 2, tool, Apache-2.0) https://github.com/google/nsjail
+  - bottlenecks: P6
+  - An alternative to bwrap for private network, pid and mount namespaces plus rlimits and cgroup memory caps, which would help the memory problem of this desktop. Config is declarative (protobuf text). Not opened beyond confirming the repository.
+  - speed claim: none
+  - read: README (clone_newnet, cgroup_mem_max, rlimit options); configs/ directory
+- **oneTBB atomic_backoff and spin_wait** (rel 2, source-file, Apache-2.0) https://github.com/uxlfoundation/oneTBB/blob/master/include/oneapi/tbb/detail/_utils.h
+  - bottlenecks: P2
+  - Small exponential-pause backoff (machine_pause with doubling count up to LOOPS_BEFORE_YIELD = 16, then yield). Tiny, Apache-2.0, easily adapted for a short bounded spin.
+  - speed claim: none
+  - read: include/oneapi/tbb/detail/_utils.h: class atomic_backoff, spin_wait_until_eq
+- **photon-ring wait strategies (Rust crate)** (rel 2, library, unverified (check crates.io page before any reuse)) https://docs.rs/photon-ring/2.5.0/src/photon_ring/wait.rs.html
+  - bottlenecks: P1
+  - Single enum of wait strategies from BusySpin to Adaptive{spin_iters,yield_iters} (default 64/64) to UMONITOR/UMWAIT and TPAUSE variants with aarch64 SEVL/WFE fallbacks. Useful as a menu of hardware wait options; the figures are author comments, and I did not check the crate's quality or tests.
+  - speed claim: Claim only, in code comments: MonitorWait '~30 ns wakeup latency', BusySpin '~0 ns wakeup', PAUSE '~140 cycles on Skylake+'. No hardware or measurement given.
+  - read: src/wait.rs: WaitStrategy enum and its docs
+- **plafl/helisim (rotor.py, isa.py, colision.c, integrador.py)** (rel 2, simulator, None declared (GitHub reports null), so reimplement only) https://github.com/plafl/helisim
+  - bottlenecks: C5, C6, C7, C9, P7
+  - A full helicopter model with a blade-element rotor, flapping, a ground-effect correction to induced velocity (efecto suelo, in rotor.py around lines 163-210), an ISA atmosphere module (isa.py) for C5, and a C collision module. The author warns the collision model is unreliable, so only the aero and atmosphere code is worth reading. Comments and docs are in Spanish.
+  - speed claim: none
+  - read: src/rotor.py: calcula_FMR(), ground-effect helper K0G inside it, src/isa.py, src/colision.c / colision.py (author says unreliable), doc/ecuaciones_del_modelo.tex
+- **pymoo and nevergrad (multi-objective and gradient-free optimisers)** (rel 2, library, MIT (nevergrad); Apache-2.0 (pymoo)) https://github.com/facebookresearch/nevergrad
+  - bottlenecks: C12
+  - Search back ends used by OpenSBT (pymoo) and many falsifiers. Candidate drivers for worst-case search. pymoo lives at github.com/the-dual-space/pymoo (Apache-2.0, formerly anyoptimization/pymoo); nevergrad is MIT.
+  - speed claim: none
+  - read: nevergrad/optimization/, https://github.com/the-dual-space/pymoo
+- **pyoscx scenariogeneration** (rel 2, library, MPL-2.0) https://github.com/pyoscx/scenariogeneration
+  - bottlenecks: C12, C11
+  - Python library that writes OpenSCENARIO and OpenDRIVE and generates parameter-permutation files from a base scenario (ScenarioGenerator with parameter sweeps). Pattern for turning a variable catalog into a set of run files (C12).
+  - speed claim: none
+  - read: scenariogeneration/scenario_generator.py (ScenarioGenerator.generate with parameter permutations), scenariogeneration/xosc/
+- **pyxcp and a2lfile (XCP master and A2L parser)** (rel 2, tool, LGPL-3.0 (pyxcp); Apache-2.0 (DanielT/a2lfile)) https://github.com/christoph2/pyxcp
+  - bottlenecks: C10, C12
+  - If SIH ever exposes its variable catalogue as an A2L-style description (name, address or index, type, limits, units), these are the off-the-shelf host-side tools to read, write and measure it. a2lfile (Apache-2.0, Rust) parses and writes A2L. pyxcp is LGPL-3.0, so use as a tool, not as code to copy. Mostly a pattern reference for a self-describing parameter table.
+  - speed claim: none
+  - read: christoph2/pyxcp (master), DanielT/a2lfile
+- **rigtorp/MPMCQueue** (rel 2, library, MIT (adaptable with attribution)) https://github.com/rigtorp/MPMCQueue
+  - bottlenecks: P5
+  - Bounded MPMC ring with per-slot turn counters, a simple and auditable alternative to uORB's lock for multi-publisher topics. Dormant since 2024.
+  - speed claim: none
+  - read: include/rigtorp/MPMCQueue.h (Slot::turn, push/pop)
+- **rigtorp/awesome-lockfree** (rel 2, write-up, none stated (list; ideas only)) https://github.com/rigtorp/awesome-lockfree
+  - bottlenecks: P5
+  - Curated list of lock-free queues, seqlocks, hazard pointers and papers; a map to more candidates for a follow-up agent.
+  - speed claim: none
+  - read: README.md
+- **rigtorp/c2clat** (rel 2, tool, MIT) https://github.com/rigtorp/c2clat
+  - bottlenecks: P1, P6
+  - Measures core-to-core atomic handoff latency, so spin-wait cost and the right core pairing for SIH thread and work queue thread can be measured on the target machine. Under WSL some topology info may be hidden.
+  - speed claim: claim: README example matrix shows 13 to 92 for an 8-CPU system (units not stated in the lines I read, presumably ns; hardware not stated).
+  - read: c2clat.cpp
+- **rmind/ttimer** (rel 2, library, BSD-2-Clause) https://github.com/rmind/ttimer
+  - bottlenecks: P5
+  - BSD-2-Clause tick-based hierarchical timing wheel in C. Permissive and small; compare it against wahern/timeout for what to copy. Seen only in search listing.
+  - speed claim: none
+  - read: Repository root; locate the timer .c/.h
+- **rr record and replay debugger (fork-based checkpoints)** (rel 2, tool, MIT-style (LICENSE file with Mozilla, VMware, Google copyrights; check text); adapt with attribution) https://github.com/rr-debugger/rr
+  - bottlenecks: P4, C13
+  - Implements checkpoints of multithreaded traced programs by cloning the tracee's address spaces and thread groups in-session (Session::clone), under full control of thread scheduling; also deterministic replay, so it is a ready oracle for determinism checks. Heavy tool, so a reference, not a lift.
+  - speed claim: none
+  - read: src/Session.cc: Session::clone overloads (lines ~115-175), src/ReplaySession.cc (checkpoint/clone), src/ExportImportCheckpoints.cc, src/test/checkpoint_dying_threads.c
+- **sched_ext and scx schedulers (sched-ext/scx)** (rel 2, runner-or-infrastructure, GPL-2.0 (repo); BPF programs must be GPL-compatible. Idea only.) https://github.com/sched-ext/scx
+  - bottlenecks: P5, P1
+  - BPF schedulers where a policy can place wakees and set dispatch queues. The point for SIH is the kernel: the WSL 6.18 default config has '# CONFIG_SCHED_CLASS_EXT is not set' and '# CONFIG_SCHED_CORE is not set', so sched_ext is not available in WSL2 without a custom kernel via .wslconfig kernel=. I did not check whether any scx scheduler offers a wake-on-waker-CPU policy; scx_layered, scx_p2dq and scx_bpfland are the ones to read for that.
+  - speed claim: none
+  - read: scheds/rust/scx_layered/src/bpf/main.bpf.c (pinning tasks to a CPU set), scheds/rust/scx_p2dq/src/bpf/main.bpf.c, scheds/rust/scx_bpfland/src/bpf/main.bpf.c (select_cpu on wakeup), scheds/rust/*/README.md
+- **sisl AdaptiveStressTestingToolbox** (rel 2, tool, MIT) https://github.com/sisl/AdaptiveStressTestingToolbox
+  - bottlenecks: C12
+  - Adaptive stress testing: search for the most likely disturbance sequence leading to failure, treating the simulator as a black box with seeded stochastic steps. Pattern for rare-failure search over disturbance sequences (wind, noise) instead of fixed sweeps. Julia version is sisl/POMDPStressTesting.jl.
+  - speed claim: none
+  - read: README and ast_toolbox/ (env wrapper and MCTS/GA solvers; layout not opened)
+- **tier4/agnocast** (rel 2, library, Apache-2.0) https://github.com/tier4/agnocast
+  - bottlenecks: P5, P6
+  - True zero-copy ROS 2 pub/sub sharing the publisher heap; paper 2605.04226 (ipc_shared_ptr) describes lifetime management with per-subscriber 0-to-1 reference transitions only, a cheap refcount scheme for shared samples.
+  - speed claim: none
+  - read: README.md, arXiv 2506.16882 and arXiv 2605.04226
+- **tokio paused clock with auto-advance** (rel 2, library, MIT (not opened this session)) https://github.com/tokio-rs/tokio/blob/master/tokio/src/time/clock.rs
+  - bottlenecks: P3, P8
+  - Pausing the clock makes time auto-advance to the next pending timer whenever the runtime is idle; auto_advance_inhibit_count stops advancing while blocking work runs. Same idle-skip rule as synctest, with an explicit inhibit counter that maps to 'do not advance while the stack is still computing the current step'.
+  - speed claim: none
+  - read: tokio/src/time/clock.rs (pause, advance, auto-advance docs, inhibit_auto_advance), tokio/src/runtime/time/source.rs
+- **vHive / REAP (record-and-prefetch working set for snapshot restore)** (rel 2, paper, MIT) https://github.com/vhive-serverless/vhive
+  - bottlenecks: P4
+  - Finds that lazily faulting snapshot pages from disk makes a restored function 95% slower than a memory-resident one, then records the stable working set on the first invocation and prefetches it in one read. Relevant if a SIH snapshot is restored from a file: restore time is dominated by page-fault count, so record the pages touched in the first simulated seconds.
+  - speed claim: Paper abstract claim (arXiv 2101.09355, Firecracker + containerd, serverless functions): REAP 'slashes the cold-start delays by 3.7x, on average'; baseline snapshot execution 95% slower than memory-resident. Hardware not read.
+  - read: memory/manager/uffd.go, memory/manager/snapshot_state.go, docs/papers/REAP_ASPLOS21.pdf
+- **webots_ros2_driver: single-threaded plugin step loop** (rel 2, library, Apache-2.0) https://github.com/cyberbotics/webots_ros2/blob/HEAD/webots_ros2_driver/src/Driver.cpp
+  - bottlenecks: P5, C14
+  - Pattern of the extern/in-controller bridge: one loop does wb_robot_step(basic time step), then calls each plugin's step() in order, then rclcpp::spin_some, with the simulated clock supplied by the step. The point for SIH is that the middleware runs on the sim thread and is pumped non-blockingly once per tick, rather than on its own threads. Only the grep output of Driver.cpp and WebotsNode.cpp was read.
+  - speed claim: none
+  - read: webots_ros2_driver/src/Driver.cpp lines ~35-90, webots_ros2_driver/src/WebotsNode.cpp step() (~313-325)
+- **xxHash and wyhash (fast state hashing)** (rel 2, library, xxHash: BSD-2-Clause library part (GitHub says 'other' due to GPL CLI); wyhash: Unlicense) https://github.com/Cyan4973/xxHash
+  - bottlenecks: C13, P5
+  - Candidates for the per-step or per-N-step state hash used in golden traces; non-cryptographic and very fast. For flash-limited targets the hash only needs to exist in a test build. Note xxHash library is BSD-2 (CLI is GPL); wyhash is Unlicense. Jolt uses its own HashBytes instead, so a 20-line FNV/murmur could suffice.
+  - speed claim: none
+  - read: xxhash.h (XXH3_64bits, XXH3_64bits_update streaming API), https://github.com/wangyi-fudan/wyhash wyhash.h
+- **AFL++ Snapshot LKM** (rel 1, tool, none declared) https://github.com/AFLplusplus/AFL-Snapshot-LKM
+  - bottlenecks: P4
+  - Kernel module that restores a process's written pages instead of fork(); archived, no licence, and its README lists multithreaded support as an open TODO. Mainly evidence that in-kernel page-reset for threaded processes is unsolved.
+  - speed claim: none
+  - read: README (TODO list), include/snapshot-inl.h in AFLplusplus/AFLplusplus
+- **ALICE-Physics (fixed-point deterministic rigid body, Rust)** (rel 1, physics-engine, unknown (not checked)) https://docs.rs/crate/alice-physics/latest
+  - bottlenecks: C13, P4
+  - 128-bit fixed-point rigid body claiming bit-identical results across CPUs and OSes, with rollback netcode examples and checksum-based desync detection. Idea source only: fixed-point is too slow and wide for SIH, but state checksum plus rollback is the point. Docs.rs page only; no GitHub repo found.
+  - speed claim: none
+  - read: src/netcode.rs, examples/rollback_netcode.rs on docs.rs
+- **Adaptyst (arXiv 2502.20947): low-overhead profiling of multi-threaded programs, off-CPU** (rel 1, paper, ) https://arxiv.org/abs/2502.20947
+  - bottlenecks: P5
+  - A paper found by an arXiv search for off-CPU. It is an off-CPU profiler for multi-threaded programs in a HEP setting. Only the title came back. I did not read it, so whether it does waker attribution is unknown.
+  - speed claim: none
+  - read: abstract and tool description
+- **Agnocast (Autoware) and its papers** (rel 1, library, Apache-2.0) https://github.com/autowarefoundation/agnocast
+  - bottlenecks: P5
+  - True zero-copy for variable-size messages by sharing the publisher heap; needs a kernel module, so it cannot be embedded. Valuable for the ipc_shared_ptr reference-listing idea (limit global metadata updates to per-subscriber 0<->1 transitions) if SIH ever shares buffers by reference across threads.
+  - speed claim: Papers arXiv 2506.16882 and 2605.04226 evaluate at Autoware scale; abstracts opened, no figure extracted.
+  - read: src/agnocastlib/src/agnocast_publisher.cpp, src/agnocastlib/src/agnocast_epoll.cpp, arXiv 2506.16882 and 2605.04226
+- **AirGym (emNavi)** (rel 1, simulator, BSD-3-Clause) https://github.com/emNavi/AirGym
+  - bottlenecks: 
+  - Another Isaac Gym drone RL platform in the same family as Aerial Gym. Found on the quadrotor-simulation topic page; not read.
+  - speed claim: none
+  - read: README (curl of main README.md returned 404; check the default branch layout)
+- **An Empirical Survey on Co-simulation: Promising Standards, Challenges and Research Needs** (rel 1, paper, ) https://arxiv.org/abs/1901.06262
+  - bottlenecks: P1
+  - Delphi study of co-simulation challenges. Context only.
+  - speed claim: none
+  - read: Challenges and research needs sections
+- **Antithesis documentation** (rel 1, write-up, Proprietary; SDKs may be open but not checked) https://antithesis.com/docs/
+  - bottlenecks: C11, C12, C13
+  - Commercial deterministic hypervisor. The landing page states 'Antithesis' simulation is perfectly deterministic' and 'perfect, effortless repro', and links to a randomness SDK, fault control and multiverse debugging. No mechanism or numbers on the page I read; the linked pages remain unread. Useful as design vocabulary (properties, fault injection, replay) rather than code.
+  - speed claim: none
+  - read: Docs pages 'How Antithesis works', SDK reference 'Generate randomness', 'Controlling faults' (linked, not opened)
+- **ArduPilot SITL reset threads (negative evidence)** (rel 1, write-up, forum posts; ArduPilot itself is GPL-3.0) https://discuss.ardupilot.org/t/quick-way-to-reset-the-sitl/141575
+  - bottlenecks: P4
+  - Shows the nearest competitor SITL has no in-process reset or snapshot: users are told to restart the binary (RTL is the closest) and reboot is 'not implemented'. So a clean SIH reset would be new ground rather than a port. Forum text seen only through search results.
+  - speed claim: none
+  - read: discuss.ardupilot.org/t/quick-way-to-reset-the-sitl/141575, discuss.ardupilot.org/t/sitl-simulation-reset/125204, discuss.ardupilot.org/t/resetting-sitl-for-evolutionary-algorithms/85106
+- **ArduPilot/ardupilot_dev_docker** (rel 1, runner-or-infrastructure, Apache-2.0) https://github.com/ArduPilot/ardupilot_dev_docker
+  - bottlenecks: P6, P4
+  - Apache-2.0 docker environments used for ArduPilot CI. Relevant only to isolated per-run containers (separate /tmp and ports) for P6; not opened beyond the listing.
+  - speed claim: none
+  - read: repository root; not read
+- **ArduPilot/renode (Antmicro Renode fork)** (rel 1, simulator, listed as other) https://github.com/ArduPilot/renode
+  - bottlenecks: P4, C13
+  - Listed in the ArduPilot organisation; Renode is a full-system emulator with deterministic virtual time and snapshotting. Probably someone else's domain; recorded as a lead only. Not opened beyond the listing.
+  - speed claim: none
+  - read: repository root; not read
+- **Autoware fault injection and scenario evaluator packages** (rel 1, tool, Apache-2.0 per common knowledge; not checked in this run.) https://github.com/autowarefoundation/autoware_universe
+  - bottlenecks: C11, C3
+  - A fault injection node and scenario adapters, a pattern for injecting failures from a config. Weak relevance for SIH; the simple planning simulator with delay and dead-zone vehicle models was not found at the path I tried (it appears to have moved).
+  - speed claim: none
+  - read: simulator/autoware_fault_injection/src/fault_injection_node/fault_injection_node.cpp
+- **Bepu Physics v2** (rel 1, physics-engine, Apache-2.0 (copyable with attribution)) https://github.com/bepu/bepuphysics2
+  - bottlenecks: P5, C13
+  - Data-oriented SIMD design with a custom thread dispatcher; claims determinism for identical inputs. Read for layout ideas only; C# is not portable to SIH.
+  - speed claim: none
+  - read: BepuPhysics/Simulation.cs (Timestep), BepuUtilities/ThreadDispatcher.cs
+- **Boost.Lockfree spsc_queue** (rel 1, library, BSL-1.0 (adaptable)) https://github.com/boostorg/lockfree
+  - bottlenecks: P5
+  - Standard SPSC ring with fixed capacity option; a licence-clean (BSL-1.0) reference for the same SPSC idea.
+  - speed claim: none
+  - read: include/boost/lockfree/spsc_queue.hpp
+- **Chipmunk2D** (rel 1, physics-engine, MIT) https://github.com/slembcke/Chipmunk2D
+  - bottlenecks: P7, P5
+  - Small plain-C engine with fixed timestep and spatial hash, example of what a flash-sized engine looks like. 2D only.
+  - speed claim: none
+  - read: src/cpSpace.c: cpSpaceStep
+- **Concurrency Kit ck_backoff** (rel 1, source-file, Simplified BSD (GitHub reports NOASSERTION; check per-file headers)) https://github.com/concurrencykit/ck/blob/master/include/ck_backoff.h
+  - bottlenecks: P2
+  - Exponential backoff helper (initial 1<<9, ceiling (1<<20)-1) used with its spinlocks; plain C, no allocations, suitable for flash-limited targets.
+  - speed claim: none
+  - read: include/ck_backoff.h: ck_backoff_eb()
+- **CoppeliaSim stepped mode (ZMQ remote API)** (rel 1, simulator, GPL-3.0 or commercial (not read; assume idea only)) https://github.com/CoppeliaRobotics/coppeliaSimLib
+  - bottlenecks: P1, C11
+  - sim.setStepping(true) then sim.step() from the client; also a forum note that with small dt the simulator cannot call out to the client each step, so stepped mode with dt equal to dynamics dt is recommended. Confirms that per-step client round trips do not scale to small dt, which supports in-process stepping as in SIH.
+  - speed claim: none
+  - read: https://manual.coppeliarobotics.com/en/zmqRemoteApiOverview.htm, https://manual.coppeliarobotics.com/en/simulation.htm
+- **CoppeliaSim stepped mode (sim.setStepping / sim.step, ZeroMQ remote API)** (rel 1, tool, Source not open on GitHub; docs only. Idea can be reimplemented.) https://manual.coppeliarobotics.com/en/simulation.htm
+  - bottlenecks: P1, P3, C11
+  - Explicit stepped mode where an external client triggers each step; the manual page gives the call pattern (setStepping(True), startSimulation, loop step()). Useful only as an API-shape reference for an external 'step N and return state' control. Pages returned HTTP 200 but I only read search summaries of them.
+  - speed claim: none
+  - read: https://manual.coppeliarobotics.com/en/simulation.htm, https://manual.coppeliarobotics.com/en/zmqRemoteApiOverview.htm
+- **CrazyRL** (rel 1, library, MIT) https://github.com/ffelten/CrazyRL
+  - bottlenecks: 
+  - Multi-agent Crazyflie RL with NumPy/PettingZoo and JAX versions of the same environments; shows the CPU-versus-JAX-GPU wall-clock gap but has no physics worth lifting. Owner-named seed.
+  - speed claim: none
+  - read: README
+- **DiffAero (arXiv 2509.10247)** (rel 1, paper, not checked) https://arxiv.org/abs/2509.10247
+  - bottlenecks: P7, P5
+  - GPU differentiable quadrotor sim; the claimed value is data layout and removal of CPU-GPU transfers, which does not fit flight hardware. Listed for its dynamics and integrator options only. Not opened.
+  - speed claim: none
+  - read: throughput table (reported at 8,192 parallel environments per search summary)
+- **Embassy embassy-sync (Watch, PubSubChannel, zerocopy_channel)** (rel 1, library, Apache-2.0 or MIT) https://github.com/embassy-rs/embassy
+  - bottlenecks: P5
+  - Embedded-first channel set: Watch (latest value with change notification), PubSubChannel, and a zero-copy channel that hands out buffer slots. Watch is the shape of a uORB depth-1 topic with change tracking. Ideas only (Rust).
+  - speed claim: none
+  - read: embassy-sync/src/watch.rs, embassy-sync/src/pubsub/mod.rs, embassy-sync/src/zerocopy_channel.rs
+- **EnTT and flecs (data-oriented ECS loops)** (rel 1, library, EnTT MIT per GitHub. flecs shown as 'other' by GitHub (SanderMertens/flecs); I believe it is MIT but did not verify.) https://github.com/skypjack/entt
+  - bottlenecks: P5
+  - Data-oriented iteration over component arrays. SIH has one rigid body and a few sensors, so the gain is small. Listed because the seed asked for it. Not a real lift.
+  - speed claim: none
+  - read: not read
+- **FaaSnap (ucsdsysnet/faasnap)** (rel 1, paper, MIT) https://github.com/ucsdsysnet/faasnap
+  - bottlenecks: P4
+  - Follow-up to REAP: working-set groups and concurrent paging for snapshot restore. Found by repo search only; paper not opened, so the mechanism description is from the repo name and recollection (lead-level).
+  - speed claim: none
+  - read: repo README
+- **FlightForge** (rel 1, simulator, BSD-3-Clause) https://github.com/ctu-mrs/flight_forge
+  - bottlenecks: 
+  - Unreal Engine 5.4 simulator from CTU MRS with procedural terrain and HIL support, control from position commands down to single-rotor throttle. Rendering-centric; not a speed source. Listed because the owner named it.
+  - speed claim: none
+  - read: arXiv 2502.05038, docs at ctu-mrs.github.io/docs/simulations/FlightForge
+- **GCC profile-guided optimization benchmarks (Phoronix GCC 10 and 12, GCC bug 94369)** (rel 1, write-up, bug tracker) https://gcc.gnu.org/bugzilla/show_bug.cgi?id=94369
+  - bottlenecks: P5, P7
+  - Evidence on PGO and LTO payoffs. With kernel time at 3 to 4 times user time, compiler-level user-code speedups cannot move the total much: even a 13% user-time gain is about 3% of wall. Bug 94369 reports PGO+LTO 6-7% slower than LTO alone on SPEC mcf, so combined use must be measured. Low priority for this campaign.
+  - speed claim: CLAIM (search summaries, pages not opened): Phoronix GCC 10 on Threadripper 3960X, -O3 -march=native baseline, PGO gave about 13% on TSCP chess and MT-DGEMM; GCC bug 94369: SPEC 505.mcf_r PGO+LTO 6-7% slower than LTO alone on Zen2 and Cascade Lake, PGO without LTO 15% faster.
+  - read: bugzilla 94369 description, phoronix.com/news/GCC-10-PGO-3960X-Xmas-Eve
+- **GNSS-SDR** (rel 1, tool, GPL-3.0 (ideas only)) https://github.com/gnss-sdr/gnss-sdr
+  - bottlenecks: C3
+  - A seed in the brief. It is a software GNSS receiver (signal processing), not an error-model source for a position-level simulator, so there is little to lift. GPL-3.0.
+  - speed claim: none
+  - read: src/ (receiver blocks; not relevant to SIH sensor models)
+- **Google Highway (portable SIMD)** (rel 1, library, dual Apache-2.0 / BSD-3 (gh reports 'other'; recalled, not opened)) https://github.com/google/highway
+  - bottlenecks: P7
+  - Portable SIMD for batch work. A single rigid body with 3-vectors gains little from SIMD, so this only matters if SIH ever steps many bodies or many noise channels per tick. Does not fit a flash-limited default path.
+  - speed claim: none
+  - read: g3doc/quick_reference.md
+- **Gymnasium AsyncVectorEnv (worker start methods and autoreset)** (rel 1, library, MIT) https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/vector/async_vector_env.py
+  - bottlenecks: P6, P4
+  - Standard interface for N parallel environment workers with shared-memory observations, selectable multiprocessing context (fork, forkserver, spawn) and defined autoreset semantics. Useful as the API contract if SIH is wrapped for batch experiments.
+  - speed claim: none
+  - read: gymnasium/vector/async_vector_env.py, gymnasium/vector/vector_env.py
+- **Hakoniwa PX4 simulator (hakoniwa-px4sim)** (rel 1, simulator, none declared (no copying)) https://github.com/toppers/hakoniwa-px4sim
+  - bottlenecks: P2, C14, C11
+  - PX4-compatible drone physics in C with a time-synchronisation layer to game engines. Archived and without a licence file, so only as a lead for how another project paces a PX4 lockstep link. Not read; listed from the repository description.
+  - speed claim: none
+  - read: repository README and the physics and time-sync directories (not opened)
+- **HyperDrone (arXiv 2610.28950)** (rel 1, paper, unknown) https://arxiv.org/abs/2610.28950
+  - bottlenecks: P7, C3
+  - Optimized multirotor dynamics batched on GPU plus ray tracing; mainly rendering so little for SIH. Noted as a recent claim.
+  - speed claim: Abstract claim: 'millions of frames per second on consumer-grade GPUs', 'more than 20x faster than existing state-of-the-art batch quadrotor simulators'. Rendering figure, not physics.
+  - read: arXiv 2610.28950 dynamics section
+- **HyperGraph ROS (arXiv 2503.05117)** (rel 1, paper, paper) https://arxiv.org/abs/2503.05117
+  - bottlenecks: P5
+  - In-process nodes connected by pointer passing over Intel TBB flow graph, a node fires as soon as a message arrives. Idea: in-process dataflow without serialisation or polling. TBB is too heavy to embed.
+  - speed claim: none
+  - read: abstract only
+- **INAV SITL (src/main/target/SITL, docs/SITL)** (rel 1, simulator, GPL-3.0) https://github.com/iNavFlight/inav/tree/master/src/main/target/SITL
+  - bottlenecks: C11
+  - Only listed by file tree; no physics inside (bridges to RealFlight and X-Plane via sim/realFlight.c, sim/xplane.c). Low value for SIH. Has a MAVLink sanity test script (src/test/mavlink/sanity/mavlink_sitl_sanity.py).
+  - speed claim: none
+  - read: src/main/target/SITL/sim/simHelper.c, src/test/mavlink/sanity/mavlink_sitl_sanity.py
+- **Intel Simics (virtual time, cells, time quantum)** (rel 1, simulator, Proprietary (assumed, not checked)) https://www.intel.com/content/www/us/en/developer/articles/tool/simics-simulator.html
+  - bottlenecks: P5, P6, C13
+  - Lead from memory: full-system simulator with per-cell virtual time and a configurable time quantum, plus checkpoints and reverse execution. Not opened or confirmed; no source available.
+  - speed claim: none
+  - read: 
+- **Intel: guest halt polling for gaming VMs / opt poll time** (rel 1, write-up, Intel article) https://www.intel.com/content/www/us/en/developer/articles/technical/gaming-workloads-in-vms-through-guest-halt-polling.html
+  - bottlenecks: P5
+  - Opened: reports guest halt polling tuning with 50K_10K parameters, no wakeup latency or IPI numbers. Useful only for how to tune poll window.
+  - speed claim: Measured on 13th-gen Core i7-1365U: FPS up 4 to 71 percent in 10 of 14 games, HLT exits down about 6 percent. Not a wake latency figure.
+  - read: Results and configuration sections
+- **Isaac Sim physics IMU sensor** (rel 1, simulator, unclear (NOASSERTION)) https://github.com/isaac-sim/IsaacSim
+  - bottlenecks: C2
+  - The seed asked about it. In the release/6.3 tree the physics IMU sources are under source/deprecated/isaacsim.sensors.physics (ImuSensor.cpp, imu_sensor.py). I did not open them or find a noise model there, so fit is unknown. It is likely noise-free filtering only.
+  - speed claim: none
+  - read: source/deprecated/isaacsim.sensors.physics/plugins/isaacsim.sensors.physics/imu_sensor/ImuSensor.cpp, source/deprecated/isaacsim.sensors.physics/python/impl/imu_sensor.py
+- **Isaac-L2F** (rel 1, simulator, MIT) https://github.com/ruhalis/Isaac-L2F
+  - bottlenecks: C6
+  - Port of L2F quadrotor dynamics to Isaac Lab on Newton; a second implementation of the same motor model that can cross-check the C++ one. Tiny repo, not read.
+  - speed claim: none
+  - read: README
+- **JaxSim** (rel 1, physics-engine, BSD-3-Clause (copyable with attribution)) https://github.com/gbionics/jaxsim
+  - bottlenecks: P7, C13
+  - Differentiable rigid body engine using Featherstone algorithms in JAX with selectable integrators; lead only.
+  - speed claim: none
+  - read: src/jaxsim/integrators (not opened)
+- **JyeSmith/dshot-esc-tester** (rel 1, tool, none) https://github.com/JyeSmith/dshot-esc-tester
+  - bottlenecks: C6
+  - A thrust-stand logger that uses DShot600 plus ESC telemetry. It shows how to get throttle, RPM, current and voltage logs from a real motor to fit the per-motor tables. Not a model.
+  - speed claim: none
+  - read: repository README (not opened)
+- **Kimbatt unity-deterministic-physics (soft-float DOTS physics)** (rel 1, physics-engine, unknown (GitHub shows none)) https://github.com/Kimbatt/unity-deterministic-physics
+  - bottlenecks: P7, C13
+  - Cross-platform determinism by swapping hardware floats for software floats, showing the cost side of the trade-off against flags-only approaches (Jolt, Box2D). Listed from repo search metadata only; not read.
+  - speed claim: none
+  - read: README; the soft-float math type
+- **Kronos (virtual time for network emulation with instruction counting)** (rel 1, runner-or-infrastructure, none (no license, idea only)) https://github.com/Vignesh2208/Kronos
+  - bottlenecks: P2, P3
+  - Linux virtual-time system where time advances by counted instructions (Intel PIN option) so an unmodified process sees deterministic time. Paper: Babu and Nicol, 'Precise Virtual Time Advancement for Network Emulation', ACM SIGSIM PADS 2020. Research prototype; the instruction-count clock is an alternative to the sim thread owning time, but too heavy for SIH.
+  - speed claim: none
+  - read: README, https://kronoz.readthedocs.io/en/latest/index.html
+- **Kshana (open-source GNSS-denied PNT simulator)** (rel 1, simulator, unknown) https://www.producthunt.com/products/kshana
+  - bottlenecks: C3, C11
+  - Lead only: a search result described it as a Rust simulator for jammed, spoofed or lost GNSS with a validated-capability count. I found no repository URL and did not open it.
+  - speed claim: none
+  - read: unknown
+- **LKML FUTEX_SPIN proposal (2024)** (rel 1, paper, GPL-2.0) https://lkml.iu.edu/hypermail/linux/kernel/2405.2/07365.html
+  - bottlenecks: P1
+  - Kernel-side spin-before-sleep on a futex when the owner is running. Includes reviewer pushback on the benchmark. Useful as a caution about measuring spin-wait.
+  - speed claim: Claim from a search summary, unopened: about 10% lower total wait time; a reviewer said the benchmark was not meaningful.
+  - read: thread and reviewer replies
+- **LKML thread: FUTEX_LOCK with optional adaptive spinning (Hart / Zijlstra / Drepper)** (rel 1, write-up, mailing list) https://lkml.iu.edu/hypermail/linux/kernel/1004.0/01511.html
+  - bottlenecks: P5
+  - Discussion and a benchmark of glibc adaptive mutex vs plain pthread_mutex vs proposed kernel adaptive futex lock. Evidence that user-space adaptive spinning without owner knowledge gives limited benefit. Search snippet reported ~1562 kiters/s for glibc adaptive, 1190 FUTEX_LOCK_ADAPTIVE, 1010 pthread_mutex, 532 FUTEX_LOCK (2010 kernel, hardware not seen); I did not open the table, so treat as a lead.
+  - speed claim: unverified: search snippet only, hardware unknown, 2010 RFC patch.
+  - read: thread body and the benchmark table in the cover message
+- **LOT: Low Overhead Transport for ROS (arXiv 2108.07085)** (rel 1, paper, paper) https://arxiv.org/abs/2108.07085
+  - bottlenecks: P5
+  - Smart pointers and synchronisation primitives living in shared memory with std-library semantics, benchmarked against loopback IPC; includes profiling of user versus kernel hotspots, a method that could be copied to find where uORB spends time.
+  - speed claim: Abstract: 'up to two orders of magnitude better than the standard IPC via local loopback'. Hardware not in the abstract.
+  - read: abstract only; profiling section for method
+- **Linux user-wait instructions UMONITOR/UMWAIT/TPAUSE (WAITPKG) patch series** (rel 1, write-up, GPL-2.0 (kernel)) https://lore.kernel.org/all/2267fbe6-37e8-7063-d48f-1879f31d3258@kernel.org/T/
+  - bottlenecks: P1
+  - Hardware mechanism for a low-power user-space wait on a memory address with a timeout and a sysfs-set maximum wait (umwait_control). Possible optional accelerated path on bare-metal x86 hosts; not for flight hardware and probably not in WSL. Lead from search result, thread not opened by me.
+  - speed claim: none
+  - read: umwait_control sysfs docs in the series, Intel SDM entries for UMWAIT/TPAUSE
+- **Lucid (Bochs snapshot fuzzer)** (rel 1, tool, MIT) https://github.com/h0mbre/Lucid
+  - bottlenecks: P4
+  - Educational snapshot fuzzer: save emulator state to disk once, resume from it, write each new input into guest memory at a registered layout (input_len + bytes), reset via a special instruction. The input-injection-at-a-fixed-layout idea maps to injecting scenario parameters into a restored SIH.
+  - speed claim: none
+  - read: README.md (snapshot, input layout, reset flow)
+- **ManiSkill3 / SAPIEN** (rel 1, simulator, Apache-2.0 (copyable with attribution)) https://github.com/haosulab/ManiSkill
+  - bottlenecks: P3, C12
+  - GPU-parallel manipulation sim on PhysX with per-environment randomization; lead only, benchmark claims not checked.
+  - speed claim: none
+  - read: mani_skill/envs/sapien_env.py (not opened)
+- **Micro XRCE-DDS Client** (rel 1, library, Apache-2.0) https://github.com/eProsima/Micro-XRCE-DDS-Client
+  - bottlenecks: 
+  - PX4 already bridges uORB to DDS through this stack; mentioned so nobody duplicates it. Not a SIH lift.
+  - speed claim: none
+  - read: n/a
+- **Modelica Reference-FMUs** (rel 1, library, NOASSERTION per GitHub API (license text not read; likely BSD-2 style, unverified)) https://github.com/modelica/Reference-FMUs
+  - bottlenecks: P7, C13
+  - Small C reference models (BouncingBall, Dahlquist, VanDerPol, Stair) with reference result files, used to test co-simulation masters. The reference-results approach fits golden traces (C13).
+  - speed claim: none
+  - read: repo README and the 'examples' / 'tests' folders (not opened)
+- **MozillaSecurity/snapshot-fuzzing and lnfuzz/smite** (rel 1, tool, MPL-2.0 (snapshot-fuzzing); MIT (smite)) https://github.com/MozillaSecurity/snapshot-fuzzing
+  - bottlenecks: P4
+  - Practical Nyx harnesses for multithreaded, multiprocess targets (Firefox, Bitcoin Lightning nodes): show how to place the snapshot point and handle threads and timers in a VM snapshot. Not opened beyond descriptions.
+  - speed claim: none
+  - read: Repo READMEs and harness agent code
+- **NASA JEOD** (rel 1, simulator, NASA Open Source Agreement (not checked)) https://github.com/nasa/jeod
+  - bottlenecks: C5, C7, C9
+  - Trick-based dynamics library (environment, mass tree, contact). Page returned HTTP 200 only; not read.
+  - speed claim: none
+  - read: not opened
+- **NanoLog (PlatformLab)** (rel 1, library, Custom, GitHub reports NOASSERTION (check LICENSE before reuse; treat as idea-only)) https://github.com/PlatformLab/NanoLog
+  - bottlenecks: P5
+  - Moves formatting out of the hot path by logging compact binary records, a model for cheaper logging of high-rate topics.
+  - speed claim: none
+  - read: README (not opened)
+- **Nimble Physics** (rel 1, physics-engine, BSD-style (header opened shows Georgia Tech/CMU copyright; full text not read)) https://github.com/keenon/nimblephysics
+  - bottlenecks: P7
+  - DART fork with analytic gradients through contact; sensitivity analysis angle for C12 (derivatives of outcomes w.r.t. parameters). Not liftable to flash.
+  - speed claim: none
+  - read: README gradients section
+- **ODE** (rel 1, physics-engine, BSD-3-Clause (copyable with attribution)) https://github.com/odedevs/ode
+  - bottlenecks: P7, C9
+  - dWorldQuickStep vs dWorldStep gives a built-in accuracy versus speed switch on the same world; ERP/CFM soft constraint parameters are a compact way to expose contact stiffness. Historical.
+  - speed claim: none
+  - read: ode/src/quickstep.cpp, ode/src/step.cpp
+- **OpenRTI (mirror of SourceForge)** (rel 1, library, Mirror reports NOASSERTION (I recall LGPL; unverified)) https://github.com/onox/OpenRTI
+  - bottlenecks: P1
+  - Open HLA RTI with time-management services. Only useful as a reference for time-advance semantics. Not opened.
+  - speed claim: none
+  - read: not opened
+- **OpenVSP** (rel 1, tool, GitHub reports 'other' (NASA Open Source Agreement likely; not checked)) https://github.com/OpenVSP/OpenVSP
+  - bottlenecks: C7
+  - Parametric geometry that can export mass properties and VSPAERO inputs; only useful offline to generate inertia and aero tables for C7.
+  - speed claim: none
+  - read: README only
+- **PX4 boards/modalai/voxl2/src/modules/sih_vio_bridge** (rel 1, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/tree/main/boards/modalai/voxl2/src/modules/sih_vio_bridge
+  - bottlenecks: C3
+  - Small work item that subscribes to vehicle_local_position_groundtruth and attitude groundtruth from SIH and forwards them to VOXL2 MPA pipes as fake VIO, using SubscriptionCallbackWorkItem on nav_and_controllers. Only lesson: ground-truth topics are the clean tap for external consumers, and this module adds one more wake-up per position update when enabled.
+  - speed claim: none
+  - read: sih_vio_bridge.cpp (init, Run)
+- **PX4 fuzz tests (libFuzzer via test/fuzztest, run_fuzz_tests.sh)** (rel 1, source-file, BSD-3-Clause) https://github.com/PX4/PX4-Autopilot/blob/95a0c23482329183d932ac99da00faa7e8d63143/Tools/ci/run_fuzz_tests.sh
+  - bottlenecks: C13, C12
+  - Existing in-tree fuzz harness style (named fuzz tests, run for a duration); template for a fixed-duration deterministic-seed campaign run in CI.
+  - speed claim: none
+  - read: Tools/ci/run_fuzz_tests.sh, platforms/posix/src/px4/common/mavlink_fuzz_tests.cpp, docs/en/test_and_ci/fuzz_tests.md, .github/workflows/fuzzing.yml
+- **Portico (HLA RTI)** (rel 1, library, CDDL per its docs (GitHub shows none; unverified)) https://github.com/openlvc/portico
+  - bottlenecks: P5
+  - HLA time management (time-regulating and time-constrained federates, LBTS lower bound on timestamp) is the standard vocabulary for what the other items implement. Reference only; far too heavy to embed.
+  - speed claim: none
+  - read: docs on time management (not opened)
+- **QNX hypervisor docs: Guest IPIs** (rel 1, write-up, QNX docs) https://www.qnx.com/developers/docs/7.1/com.qnx.doc.hypervisor.user/topic/perform/guest_ipis.html
+  - bottlenecks: P5
+  - Lead from search snippet only, not opened: describes guest-issued IPI cost as trap plus target-list compilation plus a guest exit-entry cycle on each target, and posted interrupts as the way to avoid it. Generic mechanism background for why cross-vCPU wakes cost more in a VM. Not WSL.
+  - speed claim: none
+  - read: Guest IPIs page (not opened)
+- **ROSS (Rensselaer Optimistic Simulation System)** (rel 1, simulator, BSD-3-Clause; adaptable with attribution) https://github.com/ROSS-org/ROSS
+  - bottlenecks: P4, P6
+  - Time Warp parallel discrete-event engine: optimistic execution with rollback, GVT computation (core/gvt) to know what is safe to commit. Mainly relevant as a vocabulary and design for state snapshot and rollback (reset instead of restart, P4); too heavy for SIH itself.
+  - speed claim: none
+  - read: core/gvt/mpi_allreduce.c, core/ross-gvt.h, core/tw-event.c, core/tw-kp.c
+- **RSFuzz and SwarmBug (swarm testing papers)** (rel 1, paper, paper) https://arxiv.org/abs/2409.04736
+  - bottlenecks: C12, C11
+  - Robustness-guided fuzzing of swarm parameter spaces and configuration-bug debugging for swarms (SwarmBug, FSE 2021, DOI 10.1145/3468264.3468601, Crossref confirmed; code repo anonysr218/swarmbug exists but empty of license). Mostly pattern for failure-triggering scenario generation; low relevance to single-vehicle SIH.
+  - speed claim: none
+  - read: arXiv 2409.04736 method section, swarmbug/src project page
+- **RTKLIB atmosphere and range-error models** (rel 1, library, unclear (RTKLIB's own licence text to verify)) https://github.com/tomojitakasu/RTKLIB
+  - bottlenecks: C3, C5
+  - Reference C implementations of Klobuchar ionosphere, Saastamoinen troposphere and measurement variance models, if a pseudorange-level GNSS error budget is wanted. It is a heavy codebase; the individual functions are the lift. The GitHub licence field is empty (RTKLIB is BSD-2 with extra clauses per its own text, so verify).
+  - speed claim: none
+  - read: src/rtkcmn.c (ionmodel, tropmodel), src/pntpos.c (varerr), src/ionex.c
+- **RaiSim** (rel 1, physics-engine, NOASSERTION (not a clear open license; ideas only)) https://github.com/raisimTech/raisimLib
+  - bottlenecks: P7, C9
+  - Rigid body engine tuned for legged-robot RL with a contact solver that avoids iterating on friction cone cost; mostly binary releases, so only the ideas are available.
+  - speed claim: none
+  - read: README and docs only; core is not source-available
+- **Ray (RLlib)** (rel 1, runner-or-infrastructure, Apache-2.0 (confirmed via gh)) https://github.com/ray-project/ray
+  - bottlenecks: P6, C12
+  - Mostly a pattern for running a sweep as parallel jobs with resource accounting (Ray Tune search, seeds, results tables). Its actor RPC adds latency, so it is not suited to the per-tick path. Useful only for the C12 experiment layer, run outside the PX4 process.
+  - speed claim: none
+  - read: python/ray/tune/ (search algorithms, result grid), rllib/env/ (vector env runners)
+- **SimGrid** (rel 1, simulator, LGPL (Debian copyright file; verify)) https://github.com/simgrid/simgrid
+  - bottlenecks: P3, P6
+  - Runs real or simulated actors in virtual time with many parallel simulations from one process and a model-checking mode with state snapshot. Not read; listed so the next agent can check its sleep-skipping and actor scheduler.
+  - speed claim: none
+  - read: src/kernel/EngineImpl.cpp, src/kernel/actor/ActorImpl.cpp
+- **Simulink Fast Restart and SimulationInput tuning** (rel 1, write-up, Proprietary, idea only) https://www.mathworks.com/help/simulink/ug/fast-restart.html
+  - bottlenecks: P4, C10, C12
+  - Lead only. Fast Restart is known to compile once and re-run with tunable parameter changes; SimulationInput objects carry per-run parameter overrides. Both are the same idea as the P4 reset-instead-of-restart item. Could not open the page: HEAD returned 405 and WebFetch returned 404 on the URL I used, so the details are from memory.
+  - speed claim: none
+  - read: MathWorks documentation: Fast Restart, Simulink.SimulationInput, Rapid Accelerator mode
+- **Simulink parameter tuning, SimulationInput and external mode (MathWorks)** (rel 1, write-up, proprietary) https://www.mathworks.com/help/simulink/ug/tune-block-parameters.html
+  - bottlenecks: C10, C12, C11
+  - Proprietary, so no code to lift. The concepts to note: tunable parameters applied at step boundaries (ParameterStruct), Simulink.SimulationInput objects for batch sweeps, and fast-restart (compile once, run many) as the P4 analogue. Page returned 403 to curl, so unconfirmed from here.
+  - speed claim: none
+  - read: MathWorks documentation: 'Tune Block Parameters', 'Simulink.SimulationInput', 'Fast Restart' (not opened)
+- **SwarmFuzz and SwarmBug** (rel 1, tool, MIT (SwarmFuzz); none (swarmbug/src)) https://github.com/DependableSystemsLab/SwarmFuzz
+  - bottlenecks: C12
+  - SwarmFuzz (MIT, DSN 2023) searches GPS-spoofing attack parameters over swarm runs; SwarmBug (github.com/swarmbug/src, only a web-page repo, no licence) is a misconfiguration debugger. Only relevant if SIH ever runs multi-vehicle sweeps.
+  - speed claim: none
+  - read: SwarmFuzz repo root
+- **TZC: partial serialization for zero-copy robotics IPC (arXiv 1810.00556)** (rel 1, paper, paper) https://arxiv.org/abs/1810.00556
+  - bottlenecks: P5
+  - Splits a message into a socket part and a shared-memory part so cost does not grow with size. Low fit for SIH since uORB messages are fixed small structs, noted for completeness.
+  - speed claim: Abstract: for a 4MB message overhead falls 'from tens of milliseconds to hundreds of microseconds' (ROS) and 'from hundreds of milliseconds to less than 1 millisecond' (ROS2). Hardware not in the abstract.
+  - read: abstract only
+- **Taichi** (rel 1, library, Apache-2.0 (copyable with attribution)) https://github.com/taichi-dev/taichi
+  - bottlenecks: P5
+  - Compiler for fast data-parallel kernels; Genesis is built on it. Lead only, no clear lift for SIH.
+  - speed claim: none
+  - read: 
+- **Time Warp and conservative PDES papers (Jefferson 1985; Chandy and Misra 1979 null messages)** (rel 1, paper, ) https://dl.acm.org/doi/10.1145/3916.3988
+  - bottlenecks: P5, P6
+  - Lead from memory, not opened: vocabulary for lookahead, null messages, optimistic rollback and GVT. SimBricks, Shadow runahead and HELICS apply the conservative lookahead form; ROSS the optimistic form.
+  - speed claim: none
+  - read: 
+- **Time-accurate Middleware for the Virtualization of Communication Protocols** (rel 1, paper, ) https://arxiv.org/abs/1805.09256
+  - bottlenecks: C14, P5
+  - Title only verified. Possibly relevant to sensor latency and timing conditions (C14); mark as a lead to read, not confirmed useful.
+  - speed claim: none
+  - read: abstract
+- **UAV Perception Testing Track 2027 and TLQD / CAMBA entries** (rel 1, write-up, MIT (TLQD AizhEngHN/TLQD: none stated; CAMBA mdeliso97: MIT)) https://github.com/IDeaLS-Lab/uav-testing-track-2027
+  - bottlenecks: C12
+  - Newest competition track and entries (quality-diversity search, CAMBA/TUMB generators) for the test-generation side; not about simulator internals.
+  - speed claim: none
+  - read: README of each repo; AizhEngHN/TLQD; mdeliso97/CAMBA_CPS-UAV_at_the_SBFT_Tool_Competition_2024
+- **UUV Simulator IMU/sensor plugins (Kalibr-style parameters)** (rel 1, simulator, unclear (NOASSERTION)) https://github.com/uuvsimulator/uuv_simulator
+  - bottlenecks: C2
+  - Another port of the RotorS IMU parameter set (IMUParameters), citing the Kalibr wiki; no new mechanism over RotorS. Archived.
+  - speed claim: none
+  - read: uuv_sensor_plugins (IMUROSPlugin, IMUParameters)
+- **Verilator timing and multithread scheduling (verilated_timing, verilated_threads)** (rel 1, simulator, LGPL-3.0 or Artistic-2.0 (LGPL text read): idea only) https://github.com/verilator/verilator/tree/master/include
+  - bottlenecks: P5, P7
+  - Statically scheduled evaluation with a mtask graph and spin/yield thread handoff (verilated_threads.cpp), and timing events for delays (verilated_timing.cpp). Reference for fixed per-step scheduling with minimal synchronisation.
+  - speed claim: none
+  - read: include/verilated_threads.cpp/.h, include/verilated_timing.cpp/.h, src/V3Sched.cpp
+- **VirtualTimeKernel / VT-Mininet (SOSR 2015)** (rel 1, runner-or-infrastructure, none) https://github.com/littlepretty/VirtualTimeKernel
+  - bottlenecks: P3
+  - Linux kernel patch for per-process time dilation (slow the clock to emulate faster hardware). Time dilation is another name for the speed-factor problem; the dilation-factor idea matches PX4_SIM_SPEED_FACTOR scaling of timeouts in rcS. Not seen beyond the repo listing.
+  - speed claim: none
+  - read: repo root (not opened)
+- **VisFly** (rel 1, simulator, MIT) https://github.com/SJTU-ViSYS-team/VisFly
+  - bottlenecks: P7
+  - PyTorch differentiable flight dynamics and controllers coupled to Habitat-Sim rendering. Mostly about vision; relevant only for its dynamics module and the way it keeps physics and rendering separate.
+  - speed claim: claim (abstract via search summary): rendering 'over 10,000' frames per second; DiffAero Table I lists VisFly physics at 9x10^4 FPS.
+  - read: VisFly/ dynamics module (not opened), arXiv 2407.14783
+- **X-Plane DataRefs (set any variable by UDP/plugin) ** (rel 1, write-up, proprietary) https://developer.x-plane.com/datarefs/
+  - bottlenecks: C10, C11
+  - Page exists (HTTP 200) but was not read. X-Plane is closed source, so it is only a naming reference. Datarefs are named, typed, readable and writable variables including weather, wind layers and failures. Listed so the next agent can decide whether to skip it.
+  - speed claim: none
+  - read: developer.x-plane.com/datarefs/ (not read)
+- **XYZgeomag / WMM_Tiny (small WMM implementations)** (rel 1, library, MIT (WMM_Tiny at https://github.com/miniwinwm/WMM_Tiny also MIT)) https://github.com/nhz2/XYZgeomag
+  - bottlenecks: C3
+  - Header-only C++ and a tiny C++ WMM implementation, both MIT, for completeness on the WMM/IGRF seed. PX4 already ships its own lookup (see world_magnetic_model), so the use is only a cross-check or a full-field vector (not just declination).
+  - speed claim: none
+  - read: README and the header file
+- **ZSim bound-weave parallelization** (rel 1, simulator, GPL-2.0: idea only) https://github.com/s5z/zsim
+  - bottlenecks: P5, P6
+  - Splits each interval into a fast bound phase with no cross-thread sync and a short weave phase that fixes up contention. Idea: run controllers and sensors with approximate timing and only reconcile on contested resources. Only files listed.
+  - speed claim: none
+  - read: src/contention_sim.cpp, src/core_recorder.cpp
+- **Zenoh-Pico** (rel 1, library, EPL-2.0 OR Apache-2.0 (GitHub reports NOASSERTION; confirm in LICENSE)) https://github.com/eclipse-zenoh/zenoh-pico
+  - bottlenecks: 
+  - Pub/sub client for microcontrollers, an example of keeping a messaging layer within MCU flash. Not a hot-path lift, a footprint reference.
+  - speed claim: none
+  - read: repository top-level include/zenoh-pico and src/ (not opened)
+- **awesome-webots** (rel 1, write-up, none declared) https://github.com/lukicdarkoo/awesome-webots
+  - bottlenecks: 
+  - Curated list of Webots projects and tools, last pushed 2022-12-12. Existence confirmed by repository search only, contents not read. It may point to Webots users who ran faster-than-real-time batch experiments.
+  - speed claim: none
+  - read: README.md
+- **better-sitl** (rel 1, tool, MIT) https://github.com/TCHS-aero/better-sitl
+  - bottlenecks: P6
+  - Python click CLI that launches PX4 SIH and Gazebo docker images, with --env passthrough. Shows a container-per-run approach to the parallel-run problem; README excerpt mentions no port handling or speed factor.
+  - speed claim: none
+  - read: README and CLI source (not opened)
+- **byuflowlab/CCBlade.jl** (rel 1, library, Listed as 'other' on GitHub, not verified) https://github.com/byuflowlab/CCBlade.jl
+  - bottlenecks: C6, C7
+  - A BEM solver for propellers and turbines (the Fortran/Python CCBlade came from NREL). The Julia version is the maintained one and is a candidate for an offline table generator. I did not open the source or confirm the license; the listing showed 'other'.
+  - speed claim: none
+  - read: Not opened.
+- **deepbots (Webots RL wrapper) and deepworlds** (rel 1, library, GPL-3.0) https://github.com/aidudezzz/deepbots
+  - bottlenecks: P4, C11, C12
+  - A supervisor-driven gym wrapper: step() applies action, calls supervisor step, reads observation, and reset uses supervisor simulation reset. Shows the standard reset-instead-of-restart use of Webots' Supervisor for repeated runs. Repo existence confirmed, contents not read. GPL-3.0, so ideas only.
+  - speed claim: none
+  - read: repository root README; deepbots/supervisor/controllers/ (not opened)
+- **egekonuk/ExBEMT** (rel 1, tool, GPL-3.0, so ideas only) https://github.com/egekonuk/ExBEMT--An-Extended-Blade-Element-Momentum-Theory-Solver
+  - bottlenecks: C6, C7
+  - An extended BEMT tool aimed at small-scale propellers and VTOL proprotors. Same use as pyBEMT, an offline table generator. Listing only, not opened.
+  - speed claim: none
+  - read: Not opened.
+- **eventfd with EFD_SEMAPHORE and epoll EPOLLEXCLUSIVE** (rel 1, library, man-pages) https://man7.org/linux/man-pages/man2/epoll_ctl.2.html
+  - bottlenecks: P5
+  - I opened the epoll_ctl page: EPOLLEXCLUSIVE (since 4.5) is wake-one-or-more, meant to avoid thundering herd. That is the opposite of what a time master needs (wake every expired waiter), so it is not a fit. eventfd+epoll gives a pollable multi-wait that costs more syscalls than a futex. The only fit is waiting for several event sources while also polling something, for example uORB or a socket. I did not open the eventfd page. Relevance is low.
+  - speed claim: none
+  - read: epoll_ctl(2) EPOLLEXCLUSIVE, eventfd(2) EFD_SEMAPHORE (not opened)
+- **gVisor sentry save/restore** (rel 1, runner-or-infrastructure, Apache-2.0) https://github.com/google/gvisor
+  - bottlenecks: P4, P6
+  - Userspace kernel with its own checkpoint/restore of application state, including time (state_tsc.go) and memory (pgalloc save_restore). A precedent for restoring with a rebased clock. Files confirmed to exist, not read.
+  - speed claim: none
+  - read: pkg/sentry/state/state.go, state_tsc.go, pkg/sentry/pgalloc/save_restore.go
+- **gabyfle/echelon (adaptive ladder queue)** (rel 1, library, Apache-2.0) https://github.com/gabyfle/echelon
+  - bottlenecks: P5
+  - A small, modern Apache-2.0 ladder-queue implementation, 28 stars. A starting point if a ladder queue is wanted. Not opened beyond the repo listing.
+  - speed claim: none
+  - read: Repository root; locate the queue core file first
+- **ghOSt: user-space delegation of Linux scheduling (google/ghost-userspace)** (rel 1, runner-or-infrastructure, BSD-3-Clause) https://github.com/google/ghost-userspace
+  - bottlenecks: P5
+  - Google's userspace scheduling framework, a sibling of the switchto idea. It needs the ghost kernel patches, which makes it a non-starter for SIH directly. It is useful as design background for 'a user-space policy decides which thread runs next on which CPU'.
+  - speed claim: none
+  - read: README and lib/ (agent and scheduler classes); not read in detail
+- **gnss_lib_py (Stanford NavLab)** (rel 1, library, MIT) https://github.com/Stanford-NavLab/gnss_lib_py
+  - bottlenecks: C3, C12
+  - MIT Python library for GNSS measurements, with positioning and error utilities, useful as an offline reference for GNSS error stats. I listed the repo but did not locate a simulation or noise module in the file tree, so fit is unproven.
+  - speed claim: none
+  - read: gnss_lib_py/ (not yet inspected)
+- **gps-sdr-sim (osqzss)** (rel 1, tool, MIT) https://github.com/osqzss/gps-sdr-sim
+  - bottlenecks: C3
+  - MIT C program that synthesises GPS L1 signals from a broadcast ephemeris and a user-motion file, for real spoof/jam hardware tests. It is signal level and far below what SIH publishes (position, velocity), so only the ephemeris-driven satellite visibility/geometry idea could be used for a DOP-based accuracy model. Archived.
+  - speed claim: none
+  - read: gpssim.c (satellite visibility, ionosphere and troposphere delay functions)
+- **gym-rotor** (rel 1, library, MIT) https://github.com/fdcl-gwu/gym-rotor
+  - bottlenecks: P7
+  - Quadrotor environments with state kept as a rotation matrix on SO(3) with individual motor-thrust actions; the geometric attitude representation is a reference for P7 quaternion/rotation handling. Owner-named seed.
+  - speed claim: none
+  - read: gym_rotor/envs (rotation update code, not opened)
+- **gz-math Rand (Gazebo global seeded generator)** (rel 1, library, Apache-2.0) https://github.com/gazebosim/gz-math
+  - bottlenecks: C1
+  - Counter-example showing the common weaker design (one process-global generator with Seed(), default seeded from std::random_device), same limitation as PX4's. Useful to confirm that Gazebo-side noise is also order-dependent, so a SIH fix would be better than the Gazebo path.
+  - speed claim: none
+  - read: src/Rand.cc l.36-45, 87-99; include/gz/math/Rand.hh
+- **io_uring IORING_OP_MSG_RING** (rel 1, library, liburing MIT/LGPL dual (see the entry above)) https://github.com/axboe/liburing/blob/master/man/io_uring_prep_msg_ring.3
+  - bottlenecks: P5
+  - Opened the man page. It posts a CQE (len, user_data) to another ring's fd, which is cross-thread signalling through rings. For SIH it would mean one ring per component, with the master posting step-completion messages. It is heavier than a futex word and has no batching advantage that I found, so it is a lead for comparison only.
+  - speed claim: none
+  - read: liburing man/io_uring_prep_msg_ring.3, linux io_uring/msg_ring.c (not opened)
+- **leoneandrea/Quadrotors (RKMK and commutator-free Lie integrators for quadrotors)** (rel 1, library, MIT (from gh metadata)) https://github.com/leoneandrea/Quadrotors
+  - bottlenecks: P7
+  - A worked RKMK example on a quadrotor. It is MATLAB, so it is only useful as a reference solution to test a C++ port against; no hot-path lift.
+  - speed claim: none
+  - read: src/integrators/, docs/int.rst
+- **liaajie/px4-log-analyzer** (rel 1, tool, BSD-3-Clause per search listing) https://github.com/liaajie/px4-log-analyzer
+  - bottlenecks: C13
+  - Listed by search as 'Evidence-first semantic analysis and regression for PX4 ULog files'. It may offer a run-to-run ULog comparison format. Lead only: I did not open it.
+  - speed claim: none
+  - read: 
+- **marionette (Zig deterministic simulation testing library)** (rel 1, library, MIT) https://github.com/sb2bg/marionette
+  - bottlenecks: C11, C1
+  - Small, recent DST library in the TigerBeetle style, found via gh search; lead only, not read.
+  - speed claim: none
+  - read: README.md
+- **megakilo/FreeRTOS-Sim (and other FreeRTOS POSIX forks)** (rel 1, library, GPL-2.0) https://github.com/megakilo/FreeRTOS-Sim
+  - bottlenecks: P5
+  - Found in repo search, description only: 'FreeRTOS simulator for POSIX', 96 stars, last push 2018-08-07, GPL-2.0. An older port of the same idea and superseded by the official port above. Other forks surfaced in the same search (paulreimer/esp32-simulator, sapeirone/free-rtos-fault-injection-simulator MIT, luciobaiocchi/heard Apache-2.0 'firmware-in-the-loop simulator', pushed 2026-08) were not opened. The fault-injection one may be worth a look for C11.
+  - speed claim: none
+  - read: repository root; not read
+- **mgeier/rtrb** (rel 1, library, Apache-2.0 (adaptable with attribution)) https://github.com/mgeier/rtrb
+  - bottlenecks: P1
+  - Real-time-safe wait-free SPSC ring buffer with chunked read/write access and a benchmark folder comparing competing crates; its README warns that inter-thread benchmarks are brittle, which is useful guidance for measuring SIH changes.
+  - speed claim: none
+  - read: README.md (Performance section), performance-comparison/ directory
+- **nng (nanomsg-next-gen)** (rel 1, library, MIT (adaptable)) https://github.com/nanomsg/nng
+  - bottlenecks: P5
+  - Brokerless messaging with an inproc transport and async I/O completion objects (aio); possible design reference for in-process zero-socket channels. Not read in depth.
+  - speed claim: none
+  - read: src/sp/transport/inproc/inproc.c (path assumed, not verified), src/core/aio.c (path assumed, not verified)
+- **nolar/looptime (asyncio loop time dilation and contraction)** (rel 1, library, MIT) https://github.com/nolar/looptime
+  - bottlenecks: P3
+  - Test-time event loop where waiting costs no real time; small, readable reference for idle-skip plus a speed multiplier in one place. Not a lift.
+  - speed claim: none
+  - read: repo source (not opened)
+- **py_trees and BehaviorTree.CPP (tick-based trees with blackboard)** (rel 1, library, BehaviorTree.CPP MIT; py_trees BSD (header in LICENSE)) https://github.com/BehaviorTree/BehaviorTree.CPP
+  - bottlenecks: C11
+  - Tick-driven tree of conditions and actions with a shared blackboard, as used by CARLA scenario_runner (py_trees). For SIH a full tree is too heavy, but the status model (running, success, failure) is a simple way to express sequence and parallel scenario steps. BehaviorTree.CPP is MIT C++; py_trees is BSD (LICENSE header) Python.
+  - speed claim: none
+  - read: BehaviorTree.CPP include/behaviortree_cpp/ (tree_node.h, blackboard.h), py_trees/trees.py, behaviour.py, composites.py, blackboard.py (https://github.com/splintered-reality/py_trees)
+- **rtamt4ros** (rel 1, tool, BSD-3-Clause) https://github.com/nickovic/rtamt4ros
+  - bottlenecks: C11
+  - Shows how STL monitors are attached to a live message stream. Same pattern would attach to uORB topics. ROS-specific.
+  - speed claim: none
+  - read: repo root
+- **ryntric/channels-rs** (rel 1, library, MIT) https://github.com/ryntric/channels-rs
+  - bottlenecks: P1
+  - Rust library with Disruptor-style sequencers and customizable wait strategies. A lead only: I could not list its wait-strategy files (tree grep returned nothing), so I do not know it has any lift beyond the Disruptor itself.
+  - speed claim: none
+  - read: repo root, look for wait strategy modules
+- **sensor-noise-metrology (Narcis-Abella)** (rel 1, write-up, MIT) https://github.com/Narcis-Abella/sensor-noise-metrology
+  - bottlenecks: C13, C2
+  - Research plan for validating sensor noise models used in robot simulation against empirical characterisation. Only the file tree and titles were seen (no code in the listing), so this is a lead for a validation method for C13, not a confirmed mechanism.
+  - speed claim: none
+  - read: docs/METHODOLOGY.md, docs/EXPERIMENTAL_DESIGN.md
+- **submitit** (rel 1, library, MIT) https://github.com/facebookincubator/submitit
+  - bottlenecks: P6
+  - Small job-submission layer (local or Slurm) with futures. Usable as the fan-out for many independent SIH processes if a cluster is ever used. Low relevance on a single workstation.
+  - speed claim: none
+  - read: submitit/local, submitit/slurm
+- **thun-res/vlink** (rel 1, library, Apache-2.0) https://github.com/thun-res/vlink
+  - bottlenecks: P5
+  - Newer C++ middleware aimed at autonomous driving and embodied intelligence as a ROS 2 alternative; surfaced by an iceoryx search. Not opened beyond the description, a lead for another agent.
+  - speed claim: none
+  - read: repository README (not opened)
+- **wmediumd (user-space wireless medium for UML time-travel)** (rel 1, tool, GPL-2.0: idea only) https://github.com/bcopeland/wmediumd
+  - bottlenecks: P5, C3, C14
+  - A working external 'calendar' for the UML time-travel protocol with a medium model (loss, delay). Shows what a controller implementing REQUEST/RUN/FREE_UNTIL looks like. Only existence confirmed.
+  - speed claim: none
+  - read: repo source (not opened)

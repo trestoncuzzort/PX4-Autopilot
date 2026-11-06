@@ -1,0 +1,250 @@
+[New LWP 151799]
+[New LWP 151649]
+[New LWP 151560]
+[New LWP 151330]
+[New LWP 151325]
+[New LWP 151239]
+[New LWP 151078]
+[New LWP 151011]
+[New LWP 151004]
+[New LWP 150960]
+[New LWP 150699]
+[New LWP 150328]
+[New LWP 148443]
+[New LWP 148440]
+[New LWP 148434]
+[New LWP 148433]
+[New LWP 148432]
+[New LWP 148430]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x000078dd7beecbdf in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=req@entry=0x7ffeb2f42310, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+
+Thread 19 (Thread 0x78dd7c62d6c0 (LWP 148430) "hpwork"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=30941, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c62ce28) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=30941, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c62ce28) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c62ce28, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c62cdd0, cond=0x78dd7c62ce00) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c62ce00, mutex=0x78dd7c62cdd0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=this@entry=0x5d12e6488200 <lockstep_scheduler>, cond=cond@entry=0x78dd7c62ce00, lock=lock@entry=0x78dd7c62cdd0, time_us=time_us@entry=440138000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e6287fe5 in LockstepScheduler::usleep_until (this=0x5d12e6488200 <lockstep_scheduler>, time_us=440138000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:199
+#7  0x00005d12e628881a in work_hpthread (argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/work_queue/work_thread.c:279
+#8  0x00005d12e627e18b in entry_adapter (ptr=0x5d1318a71720) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#9  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#10 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 18 (Thread 0x78dd7c61e6c0 (LWP 148432) "lpwork"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=30941, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c61de28) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=30941, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c61de28) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c61de28, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c61ddd0, cond=0x78dd7c61de00) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c61de00, mutex=0x78dd7c61ddd0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=this@entry=0x5d12e6488200 <lockstep_scheduler>, cond=cond@entry=0x78dd7c61de00, lock=lock@entry=0x78dd7c61ddd0, time_us=time_us@entry=440154000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e6287fe5 in LockstepScheduler::usleep_until (this=0x5d12e6488200 <lockstep_scheduler>, time_us=440154000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:199
+#7  0x00005d12e628883d in work_lpthread (argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/work_queue/work_thread.c:305
+#8  0x00005d12e627e18b in entry_adapter (ptr=0x5d1318a718b0) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#9  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#10 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 17 (Thread 0x78dd7c60f6c0 (LWP 148433) "wkr_hrt"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c60edf8) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c60edf8) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c60edf8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c60eda0, cond=0x78dd7c60edd0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c60edd0, mutex=0x78dd7c60eda0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=this@entry=0x5d12e6488200 <lockstep_scheduler>, cond=cond@entry=0x78dd7c60edd0, lock=lock@entry=0x78dd7c60eda0, time_us=time_us@entry=440828000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e6287fe5 in LockstepScheduler::usleep_until (this=0x5d12e6488200 <lockstep_scheduler>, time_us=440828000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:199
+#7  0x00005d12e6288360 in hrt_work_process () at /root/sih/px4/platforms/common/work_queue/hrt_thread.c:232
+#8  work_hrtthread (argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/work_queue/hrt_thread.c:276
+#9  0x00005d12e627e18b in entry_adapter (ptr=0x5d1318a71a40) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#10 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#11 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 16 (Thread 0x78dd7c5ffac0 (LWP 148434) "wq:manager"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=30941, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd74000c94) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=30941, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd74000c94) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd74000c94, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd74000c40, cond=0x78dd74000c68) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd74000c68, mutex=0x78dd74000c40) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e627e91c in px4_sem_wait (s=0x78dd74000c40) at /root/sih/px4/platforms/posix/src/px4/common/px4_sem.cpp:89
+#6  0x00005d12e62817f0 in BlockingQueue<px4::wq_config_t const*, 1ul>::pop (this=0x78dd74000be0) at /root/sih/px4/src/include/containers/BlockingQueue.hpp:71
+#7  px4::WorkQueueManagerRun () at /root/sih/px4/platforms/common/px4_work_queue/WorkQueueManager.cpp:342
+#8  0x00005d12e627e18b in entry_adapter (ptr=0x5d1318a71bd0) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#9  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#10 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 15 (Thread 0x78dd7c5eb6c0 (LWP 148440) "wq:single"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c5ead6c) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c5ead6c) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c5ead6c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c5ead18, cond=0x78dd7c5ead40) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c5ead40, mutex=0x78dd7c5ead18) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e627e91c in px4_sem_wait (s=0x78dd7c5ead18) at /root/sih/px4/platforms/posix/src/px4/common/px4_sem.cpp:89
+#6  0x00005d12e6281290 in px4::WorkQueue::Run (this=this@entry=0x78dd7c5eaca0) at /root/sih/px4/platforms/common/px4_work_queue/WorkQueue.cpp:205
+#7  0x00005d12e6281b0e in px4::WorkQueueRunner (context=<optimized out>) at /root/sih/px4/platforms/common/px4_work_queue/WorkQueueManager.cpp:314
+#8  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#9  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 14 (Thread 0x78dd7bdff6c0 (LWP 148443) "px4"):
+#0  0x000078dd7bf1b79d in __GI___poll (fds=fds@entry=0x78dd6c001290, nfds=nfds@entry=1, timeout=timeout@entry=-1) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x00005d12e6286f17 in poll (__timeout=-1, __nfds=1, __fds=<optimized out>) at /usr/include/x86_64-linux-gnu/bits/poll2.h:39
+#2  px4_daemon::Server::_server_main (this=<optimized out>) at /root/sih/px4/platforms/posix/src/px4/common/px4_daemon/server.cpp:160
+#3  0x00005d12e628759d in px4_daemon::Server::_server_main_trampoline (self=<optimized out>) at /root/sih/px4/platforms/posix/src/px4/common/px4_daemon/server.cpp:137
+#4  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#5  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 13 (Thread 0x78dd7c5c6600 (LWP 150328) "dataman"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=942698604, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c5c5c10) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=942698604, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c5c5c10) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c5c5c10, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c5c5bc0, cond=0x78dd7c5c5be8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c5c5be8, mutex=0x78dd7c5c5bc0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=0x5d12e6488200 <lockstep_scheduler>, cond=0x78dd7c5c5be8, lock=0x78dd7c5c5bc0, time_us=441104000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e627ea2f in px4_sem_timedwait (s=0x78dd7c5c5bc0, abstime=0x78dd7c5c5bb0) at /root/sih/px4/platforms/posix/src/px4/common/px4_sem.cpp:137
+#7  0x00005d12e62672ba in px4_poll (fds=0x78dd7c5c5cb0, nfds=<optimized out>, timeout=1000) at /root/sih/px4/src/lib/cdev/posix/cdev_platform.cpp:414
+#8  0x00005d12e5fe7981 in task_main (argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/src/modules/dataman/dataman.cpp:758
+#9  task_main (argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/src/modules/dataman/dataman.cpp:678
+#10 0x00005d12e627e18b in entry_adapter (ptr=0x78dd700030c0) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#11 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+
+Thread 12 (Thread 0x78dd7c5b0b80 (LWP 150699) "sih"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=1147207680, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x5d12e648825c <lockstep_scheduler+92>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=1147207680, abstime=0x0, clockid=0, expected=0, futex_word=0x5d12e648825c <lockstep_scheduler+92>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5d12e648825c <lockstep_scheduler+92>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x5d12e6488208 <lockstep_scheduler+8>, cond=0x5d12e6488230 <lockstep_scheduler+48>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x5d12e6488230 <lockstep_scheduler+48>, mutex=0x5d12e6488208 <lockstep_scheduler+8>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6288213 in LockstepComponents::wait_for_components (this=0x5d12e6488200 <lockstep_scheduler>) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_components.cpp:116
+#6  0x00005d12e610bf58 in Sih::lockstep_loop (this=0x78dd70004360) at /root/sih/px4/src/modules/simulation/simulator_sih/sih.cpp:176
+#7  0x00005d12e610c1ee in Sih::run (this=0x78dd70004360) at /root/sih/px4/src/modules/simulation/simulator_sih/sih.cpp:91
+#8  0x00005d12e627e822 in ModuleBase::run_trampoline_impl (desc=..., instantiate=<optimized out>, argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/module_base.cpp:219
+#9  0x00005d12e627e18b in entry_adapter (ptr=0x78dd70000cf0) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#10 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#11 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 11 (Thread 0x78dd7c58b980 (LWP 150960) "commander"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=30941, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c58b008) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=30941, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c58b008) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c58b008, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c58afb0, cond=0x78dd7c58afe0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c58afe0, mutex=0x78dd7c58afb0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=this@entry=0x5d12e6488200 <lockstep_scheduler>, cond=cond@entry=0x78dd7c58afe0, lock=lock@entry=0x78dd7c58afb0, time_us=time_us@entry=440110000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e6287fe5 in LockstepScheduler::usleep_until (this=0x5d12e6488200 <lockstep_scheduler>, time_us=440110000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:199
+#7  0x00005d12e5fd297a in Commander::run (this=0x78dd4c000b70) at /root/sih/px4/src/modules/commander/Commander.cpp:2203
+#8  0x00005d12e627e822 in ModuleBase::run_trampoline_impl (desc=..., instantiate=<optimized out>, argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/module_base.cpp:219
+#9  0x00005d12e627e18b in entry_adapter (ptr=0x78dd60001040) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#10 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#11 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 10 (Thread 0x78dd7c574ec0 (LWP 151004) "navigator"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=942698604, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c574370) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=942698604, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c574370) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c574370, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c574320, cond=0x78dd7c574348) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c574348, mutex=0x78dd7c574320) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=0x5d12e6488200 <lockstep_scheduler>, cond=0x78dd7c574348, lock=0x78dd7c574320, time_us=441096000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e627ea2f in px4_sem_timedwait (s=0x78dd7c574320, abstime=0x78dd7c574310) at /root/sih/px4/platforms/posix/src/px4/common/px4_sem.cpp:137
+#7  0x00005d12e62672ba in px4_poll (fds=0x78dd7c5744b0, nfds=<optimized out>, timeout=1000) at /root/sih/px4/src/lib/cdev/posix/cdev_platform.cpp:414
+#8  0x00005d12e60c5bfb in Navigator::run (this=0x78dd600090f0) at /root/sih/px4/src/modules/navigator/navigator_main.cpp:282
+#9  0x00005d12e627e822 in ModuleBase::run_trampoline_impl (desc=..., instantiate=<optimized out>, argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/module_base.cpp:219
+#10 0x00005d12e627e18b in entry_adapter (ptr=0x78dd60008f50) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#11 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+
+Thread 9 (Thread 0x78dd7c55e3c0 (LWP 151011) "uxrce_dds_clien"):
+#0  0x000078dd7bf1b79d in __GI___poll (fds=fds@entry=0x78dd50007a28, nfds=nfds@entry=1, timeout=1000) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x00005d12e62019e6 in poll (__timeout=<optimized out>, __nfds=1, __fds=0x78dd50007a28) at /usr/include/x86_64-linux-gnu/bits/poll2.h:39
+#2  uxr_read_udp_data_platform (platform=platform@entry=0x78dd50007a28, buf=buf@entry=0x78dd50007800 "", len=len@entry=512, timeout=<optimized out>, errcode=errcode@entry=0x78dd7c55d5d7 "") at /root/sih/px4/src/modules/uxrce_dds_client/Micro-XRCE-DDS-Client/src/c/profile/transport/ip/udp/udp_transport_posix.c:97
+#3  0x00005d12e62016be in recv_udp_msg (instance=0x78dd50007800, buf=0x78dd7c55d610, len=0x78dd7c55d618, timeout=<optimized out>) at /root/sih/px4/src/modules/uxrce_dds_client/Micro-XRCE-DDS-Client/src/c/profile/transport/ip/udp/udp_transport.c:62
+#4  0x00005d12e61ff5d7 in listen_info_message (comm=comm@entry=0x78dd50007a00, timeout=timeout@entry=1000) at /root/sih/px4/src/modules/uxrce_dds_client/Micro-XRCE-DDS-Client/src/c/util/ping.c:145
+#5  0x00005d12e61ff72b in uxr_ping_agent_attempts (comm=0x78dd50007a00, timeout_ms=1000, attempts=<optimized out>) at /root/sih/px4/src/modules/uxrce_dds_client/Micro-XRCE-DDS-Client/src/c/util/ping.c:95
+#6  0x00005d12e611f3da in UxrceddsClient::setupSession (this=this@entry=0x78dd50005750, session=session@entry=0x78dd7c55d9c0) at /root/sih/px4/src/modules/uxrce_dds_client/uxrce_dds_client.cpp:230
+#7  0x00005d12e612107b in UxrceddsClient::run (this=0x78dd50005750) at /root/sih/px4/src/modules/uxrce_dds_client/uxrce_dds_client.cpp:675
+#8  0x00005d12e627e822 in ModuleBase::run_trampoline_impl (desc=..., instantiate=<optimized out>, argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/common/module_base.cpp:219
+#9  0x00005d12e627e18b in entry_adapter (ptr=0x78dd50002ce0) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#10 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#11 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 8 (Thread 0x78dd7c543400 (LWP 151078) "mavlink_if0"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=23826, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c542918) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=23826, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c542918) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c542918, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c5428c0, cond=0x78dd7c5428f0) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c5428f0, mutex=0x78dd7c5428c0) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=this@entry=0x5d12e6488200 <lockstep_scheduler>, cond=cond@entry=0x78dd7c5428f0, lock=lock@entry=0x78dd7c5428c0, time_us=time_us@entry=440105500) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e6287fe5 in LockstepScheduler::usleep_until (this=0x5d12e6488200 <lockstep_scheduler>, time_us=440105500) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:199
+#7  0x00005d12e6076362 in Mavlink::task_main (this=this@entry=0x78dd3c000b70, argc=11, argc@entry=13, argv=0x78dd44001ff0, argv@entry=0x78dd44001fe0) at /root/sih/px4/src/modules/mavlink/mavlink_main.cpp:2871
+#8  0x00005d12e60790cc in Mavlink::start_helper (argc=13, argv=0x78dd44001fe0) at /root/sih/px4/src/modules/mavlink/mavlink_main.cpp:3489
+#9  0x00005d12e627e18b in entry_adapter (ptr=0x78dd44001fc0) at /root/sih/px4/platforms/posix/src/px4/common/tasks.cpp:97
+#10 0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#11 0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x78dd7c52d640 (LWP 151239) "mavlink_rcv_if0"):
+#0  0x000078dd7bf1b79d in __GI___poll (fds=fds@entry=0x78dd7c52ac88, nfds=nfds@entry=1, timeout=timeout@entry=10) at ../sysdeps/unix/sysv/linux/poll.c:29
+#1  0x00005d12e609dbf8 in poll (__timeout=10, __nfds=1, __fds=0x78dd7c52ac88) at /usr/include/x86_64-linux-gnu/bits/poll2.h:39
+#2  MavlinkReceiver::run (this=<optimized out>) at /root/sih/px4/src/modules/mavlink/mavlink_receiver.cpp:4016
+#3  0x00005d12e609f9bd in MavlinkReceiver::start_trampoline (context=<optimized out>) at /root/sih/px4/src/modules/mavlink/mavlink_receiver.cpp:4514
+#4  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#5  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 6 (Thread 0x78dd7c525080 (LWP 151325) "logger"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=30941, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd7c524478) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=30941, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd7c524478) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd7c524478, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd7c524420, cond=0x78dd7c524450) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd7c524450, mutex=0x78dd7c524420) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e6287e78 in LockstepScheduler::cond_timedwait (this=this@entry=0x5d12e6488200 <lockstep_scheduler>, cond=cond@entry=0x78dd7c524450, lock=lock@entry=0x78dd7c524420, time_us=time_us@entry=440107000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:165
+#6  0x00005d12e6287fe5 in LockstepScheduler::usleep_until (this=0x5d12e6488200 <lockstep_scheduler>, time_us=440107000) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/src/lockstep_scheduler.cpp:199
+#7  0x00005d12e60690e6 in px4::logger::LogWriterFile::write_message (this=0x78dd44000ec0, type=<optimized out>, ptr=0x78dd7c524570, size=20, dropout_start=375696000) at /root/sih/px4/src/modules/logger/log_writer_file.cpp:510
+#8  0x00005d12e6068a79 in px4::logger::LogWriter::write_message (this=this@entry=0x78dd44002718, type=type@entry=px4::logger::LogType::Full, ptr=ptr@entry=0x78dd7c524570, size=size@entry=20, dropout_start=<optimized out>) at /root/sih/px4/src/modules/logger/log_writer.cpp:168
+#9  0x00005d12e6063bb5 in px4::logger::Logger::write_message (this=this@entry=0x78dd44002560, type=type@entry=px4::logger::LogType::Full, ptr=ptr@entry=0x78dd7c524570, size=size@entry=20) at /root/sih/px4/src/modules/logger/logger.cpp:1366
+#10 0x00005d12e606511e in px4::logger::Logger::write_add_logged_msg (this=this@entry=0x78dd44002560, type=type@entry=px4::logger::LogType::Full, subscription=...) at /root/sih/px4/src/modules/logger/logger.cpp:2081
+#11 0x00005d12e606820b in px4::logger::Logger::copy_if_updated (try_to_subscribe=<optimized out>, buffer=0x78dd440019b5, sub_idx=40, this=0x78dd44002560) at /root/sih/px4/src/modules/logger/logger.cpp:541
+
+Thread 5 (Thread 0x78dd7c50dfc0 (LWP 151330) "log_writer_file"):
+#0  0x000078dd7be98e51 in __futex_abstimed_wait_common64 (private=30941, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x78dd44000fbc) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=30941, abstime=0x0, clockid=0, expected=0, futex_word=0x78dd44000fbc) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x78dd44000fbc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x000078dd7be9b8cd in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x78dd44000f68, cond=0x78dd44000f90) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x78dd44000f90, mutex=0x78dd44000f68) at ./nptl/pthread_cond_wait.c:627
+#5  0x00005d12e60698c1 in px4::logger::LogWriterFile::run (this=this@entry=0x78dd44000ec0) at /root/sih/px4/src/modules/logger/log_writer_file.cpp:491
+#6  0x00005d12e6069be8 in px4::logger::LogWriterFile::run_helper (context=0x78dd44000ec0) at /root/sih/px4/src/modules/logger/log_writer_file.cpp:328
+#7  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#8  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x78dd7b5fe6c0 (LWP 151560) "px4" (Exiting)):
+#0  0x000078dd7beecbdf in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=req@entry=0x78dd7b5fde20, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+#1  0x000078dd7bef9b27 in __GI___nanosleep (req=req@entry=0x78dd7b5fde20, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x000078dd7bf299bc in usleep (useconds=<optimized out>) at ../sysdeps/posix/usleep.c:31
+#3  0x00005d12e6287b7a in LockstepScheduler::TimedWait::~TimedWait (this=0x78dd7b5fe688, __in_chrg=<optimized out>) at /root/sih/px4/platforms/posix/src/px4/common/lockstep_scheduler/include/lockstep_scheduler/lockstep_scheduler.h:84
+#4  0x000078dd7be4772f in __GI___call_tls_dtors () at ./stdlib/cxa_thread_atexit_impl.c:156
+#5  0x000078dd7be9c96b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:452
+#6  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x78dd7adfd6c0 (LWP 151649) "px4"):
+#0  futex_wait (private=0, expected=2, futex_word=0x5d12e6487620 <px4_modules_mutex>) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x5d12e6487620 <px4_modules_mutex>, private=0) at ./nptl/lowlevellock.c:49
+#2  0x000078dd7bea01e1 in lll_mutex_lock_optimized (mutex=0x5d12e6487620 <px4_modules_mutex>) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x5d12e6487620 <px4_modules_mutex>) at ./nptl/pthread_mutex_lock.c:93
+#4  0x00005d12e627e66c in ModuleBase::status_command (desc=...) at /root/sih/px4/platforms/common/module_base.cpp:160
+#5  0x00005d12e6284ce0 in px4_daemon::Pxh::process_line (line="simulator_sih status", silently_fail=silently_fail@entry=true) at /root/sih/px4/platforms/posix/src/px4/common/px4_daemon/pxh.cpp:117
+#6  0x00005d12e62866f5 in px4_daemon::Server::_handle_client (arg=0x78dd6c000b90) at /root/sih/px4/platforms/posix/src/px4/common/px4_daemon/server.cpp:293
+#7  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#8  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x78dd7a5fc6c0 (LWP 151799) "px4"):
+#0  futex_wait (private=0, expected=2, futex_word=0x5d12e6487620 <px4_modules_mutex>) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x5d12e6487620 <px4_modules_mutex>, private=0) at ./nptl/lowlevellock.c:49
+#2  0x000078dd7bea01e1 in lll_mutex_lock_optimized (mutex=0x5d12e6487620 <px4_modules_mutex>) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x5d12e6487620 <px4_modules_mutex>) at ./nptl/pthread_mutex_lock.c:93
+#4  0x00005d12e627e66c in ModuleBase::status_command (desc=...) at /root/sih/px4/platforms/common/module_base.cpp:160
+#5  0x00005d12e6284ce0 in px4_daemon::Pxh::process_line (line="simulator_sih status", silently_fail=silently_fail@entry=true) at /root/sih/px4/platforms/posix/src/px4/common/px4_daemon/pxh.cpp:117
+#6  0x00005d12e62866f5 in px4_daemon::Server::_handle_client (arg=0x78dd6c000b90) at /root/sih/px4/platforms/posix/src/px4/common/px4_daemon/server.cpp:293
+#7  0x000078dd7be9cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#8  0x000078dd7bf29ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x78dd7c62e780 (LWP 148420) "px4"):
+#0  0x000078dd7beecbdf in __GI___clock_nanosleep (clock_id=clock_id@entry=0, flags=flags@entry=0, req=req@entry=0x7ffeb2f42310, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:78
+#1  0x000078dd7bef9b27 in __GI___nanosleep (req=req@entry=0x7ffeb2f42310, rem=rem@entry=0x0) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x000078dd7bf299bc in usleep (useconds=<optimized out>) at ../sysdeps/posix/usleep.c:31
+#3  0x00005d12e5f96aa5 in wait_to_exit () at /root/sih/px4/platforms/posix/src/px4/common/main.cpp:649
+#4  main (argc=<optimized out>, argv=<optimized out>) at /root/sih/px4/platforms/posix/src/px4/common/main.cpp:400
+[Inferior 1 (process 148420) detached]

@@ -1,0 +1,15 @@
+before   requested     0.5: actual    0.41x ( 81.3% of request), SIH reports 0.50
+before   requested       1: actual    0.81x ( 80.7% of request), SIH reports 1.00
+before   requested       2: actual    1.62x ( 80.8% of request), SIH reports 2.00
+before   requested       5: actual    4.08x ( 81.5% of request), SIH reports 5.00
+before   requested      10: actual    8.32x ( 83.2% of request), SIH reports 10.00
+before   requested      20: actual   16.96x ( 84.8% of request), SIH reports 19.88
+before   requested      40: actual   33.78x ( 84.4% of request), SIH reports 39.91
+after    requested     0.5: actual    0.50x (100.0% of request), SIH reports 0.59
+after    requested       1: actual    1.00x (100.0% of request), SIH reports 1.00
+after    requested       2: actual    2.00x (100.0% of request), SIH reports 2.00
+after    requested       5: actual    5.00x (100.0% of request), SIH reports 5.00
+after    requested      10: actual   10.00x (100.0% of request), SIH reports 10.02
+after    requested      20: actual   20.00x (100.0% of request), SIH reports 20.19
+after    requested      40: actual   40.00x (100.0% of request), SIH reports 40.15
+PACE DONE

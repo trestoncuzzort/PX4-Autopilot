@@ -1,0 +1,122 @@
+{
+  "base": {
+    "runs": 4,
+    "rtf_median": 13.373863016860259,
+    "rtf_range": [
+      12.458710242194337,
+      13.558292019830482
+    ],
+    "flight_wall_s": 6.341,
+    "whole_run_wall_s": 9.48,
+    "user_s": 4.585,
+    "sys_s": 11.06,
+    "context_switches": 625229.5,
+    "ulog_write_dropouts": 0,
+    "all_recorded_sample_ages_zero": true,
+    "all_topic_logger_gaps": [
+      49,
+      28,
+      37,
+      16
+    ],
+    "rtf_ratio_to_stock": 1.0,
+    "context_switch_reduction": 0.0,
+    "system_cpu_reduction": 0.0
+  },
+  "candidate": {
+    "runs": 4,
+    "rtf_median": 14.40041623413956,
+    "rtf_range": [
+      14.353420471906297,
+      14.807387862796835
+    ],
+    "flight_wall_s": 5.8415,
+    "whole_run_wall_s": 8.629999999999999,
+    "user_s": 4.265000000000001,
+    "sys_s": 8.84,
+    "context_switches": 497209.0,
+    "ulog_write_dropouts": 0,
+    "all_recorded_sample_ages_zero": true,
+    "all_topic_logger_gaps": [
+      18,
+      38,
+      19,
+      26
+    ],
+    "rtf_ratio_to_stock": 1.0767581674782476,
+    "context_switch_reduction": 0.2047576130045048,
+    "system_cpu_reduction": 0.20072332730560583
+  },
+  "offboard": {
+    "runs": 4,
+    "rtf_median": 17.774858105976904,
+    "rtf_range": [
+      17.60218671152229,
+      17.98670383873043
+    ],
+    "flight_wall_s": 4.75,
+    "whole_run_wall_s": 7.42,
+    "user_s": 3.775,
+    "sys_s": 6.755,
+    "context_switches": 390160.0,
+    "ulog_write_dropouts": 0,
+    "all_recorded_sample_ages_zero": true,
+    "all_topic_logger_gaps": [
+      45,
+      68,
+      19,
+      34
+    ],
+    "rtf_ratio_to_stock": 1.3290743357822916,
+    "context_switch_reduction": 0.37597314266201454,
+    "system_cpu_reduction": 0.389240506329114
+  },
+  "single": {
+    "runs": 4,
+    "rtf_median": 23.296700602136422,
+    "rtf_range": [
+      22.944946589975352,
+      24.006849315068493
+    ],
+    "flight_wall_s": 3.608,
+    "whole_run_wall_s": 6.365,
+    "user_s": 3.725,
+    "sys_s": 5.98,
+    "context_switches": 305395.0,
+    "ulog_write_dropouts": 0,
+    "all_recorded_sample_ages_zero": true,
+    "all_topic_logger_gaps": [
+      8,
+      13,
+      24,
+      8
+    ],
+    "rtf_ratio_to_stock": 1.7419574712830965,
+    "context_switch_reduction": 0.511547359809478,
+    "system_cpu_reduction": 0.45931283905967446
+  },
+  "both": {
+    "runs": 4,
+    "rtf_median": 30.824375947248548,
+    "rtf_range": [
+      29.380604796663196,
+      32.33065442020666
+    ],
+    "flight_wall_s": 2.745,
+    "whole_run_wall_s": 5.52,
+    "user_s": 3.26,
+    "sys_s": 3.885,
+    "context_switches": 215461.0,
+    "ulog_write_dropouts": 0,
+    "all_recorded_sample_ages_zero": true,
+    "all_topic_logger_gaps": [
+      13,
+      10,
+      14,
+      14
+    ],
+    "rtf_ratio_to_stock": 2.3048221675658445,
+    "context_switch_reduction": 0.6553889411807985,
+    "system_cpu_reduction": 0.6487341772151899
+  }
+}

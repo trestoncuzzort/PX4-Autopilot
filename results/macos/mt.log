@@ -1,0 +1,26 @@
+mt-default run 0 exit 0 flight 1.469 elapsed 4.74 user 3.52 sys 5.41 invol 1012515; Overall result: PASS
+mt-both run 0 exit 0 flight 0.927 elapsed 4.20 user 3.34 sys 3.55 invol 770752; Overall result: PASS
+mt-both-r40k run 0 exit 0 flight 0.948 elapsed 4.45 user 3.52 sys 4.00 invol 847450; Overall result: PASS
+mt-both-r10k run 0 exit 0 flight 0.703 elapsed 3.49 user 2.56 sys 2.27 invol 509646; Overall result: PASS
+mt-inline-r10k run 0 exit 0 flight 0.552 elapsed 3.50 user 2.75 sys 1.99 invol 452632; Overall result: PASS
+mt-default run 1 exit 0 flight 1.557 elapsed 4.51 user 3.65 sys 5.31 invol 931447; Overall result: PASS
+mt-both run 1 exit 0 flight 0.976 elapsed 4.52 user 3.60 sys 4.01 invol 822944; Overall result: PASS
+mt-both-r40k run 1 exit 1 flight none elapsed 5.75 user 4.72 sys 5.83 invol 1238191; Overall result: FAIL
+mt-both-r10k run 1 exit 0 flight 0.731 elapsed 3.63 user 2.70 sys 2.37 invol 515863; Overall result: PASS
+mt-inline-r10k run 1 exit 0 flight 0.568 elapsed 3.60 user 2.85 sys 2.03 invol 450586; Overall result: PASS
+mt-default run 2 exit 0 flight 1.580 elapsed 4.61 user 3.72 sys 5.39 invol 948334; Overall result: PASS
+mt-both run 2 exit 0 flight 1.004 elapsed 4.62 user 3.70 sys 4.12 invol 831024; Overall result: PASS
+mt-both-r40k run 2 exit 0 flight 1.000 elapsed 4.60 user 3.67 sys 4.08 invol 820229; Overall result: PASS
+mt-both-r10k run 2 exit 0 flight 0.747 elapsed 3.62 user 2.69 sys 2.35 invol 503953; Overall result: PASS
+mt-inline-r10k run 2 exit 0 flight 0.568 elapsed 3.62 user 2.87 sys 2.04 invol 447565; Overall result: PASS
+mt-default run 3 exit 0 flight 1.604 elapsed 4.68 user 3.77 sys 5.50 invol 968312; Overall result: PASS
+mt-both run 3 exit 1 flight none elapsed 5.90 user 4.81 sys 6.15 invol 1266924; Overall result: FAIL
+mt-both-r40k run 3 exit 1 flight none elapsed 5.81 user 4.75 sys 5.98 invol 1227726; Overall result: FAIL
+mt-both-r10k run 3 exit 0 flight 0.782 elapsed 3.69 user 2.71 sys 2.44 invol 515296; Overall result: PASS
+mt-inline-r10k run 3 exit 0 flight 0.581 elapsed 3.53 user 2.84 sys 1.95 invol 417050; Overall result: PASS
+mt-default run 4 exit 0 flight 1.616 elapsed 4.75 user 3.82 sys 5.62 invol 985699; Overall result: PASS
+mt-both run 4 exit 1 flight none elapsed 5.66 user 4.64 sys 5.68 invol 1168149; Overall result: FAIL
+mt-both-r40k run 4 exit 1 flight none elapsed 5.80 user 4.73 sys 5.94 invol 1210663; Overall result: FAIL
+mt-both-r10k run 4 exit 0 flight 0.784 elapsed 3.70 user 2.72 sys 2.45 invol 519144; Overall result: PASS
+mt-inline-r10k run 4 exit 0 flight 0.575 elapsed 3.63 user 2.88 sys 2.02 invol 439147; Overall result: PASS
+MT DONE

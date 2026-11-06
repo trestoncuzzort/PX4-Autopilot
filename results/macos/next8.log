@@ -1,0 +1,6 @@
+9c1cf87b85 fix(logger): retry a failed log write in host time
+tests exit 0 (attempt 1)
+1/1 Test #197: functional-SihPhysics ............   Passed    0.59 sec
+100% tests passed out of 1
+GTEST DONE
+MAC NEXT8 DONE

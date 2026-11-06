@@ -1,0 +1,66 @@
+21:58:26 tree at 09bf1a7a68 feat(simulation): give each simulated sensor its own noise , 09bf1a7a68179b99d3872de00aba377b8be98794
+21:58:53 SIH BUILT
+final      run 0: while held dropouts: 2, takeoff command returned True, simulated time 184.424 -> 329.372: advancing
+final      run 1: while held dropouts: 3, takeoff command returned True, simulated time 193.228 -> 361.036: advancing
+final      run 2: while held dropouts: 2, takeoff command returned True, simulated time 175.032 -> 331.64: advancing
+final    requested     0.5: actual    0.50x (100.1% of request), SIH reports 0.50
+final    requested       1: actual    1.00x (100.0% of request), SIH reports 1.00
+final    requested       5: actual    5.00x (100.0% of request), SIH reports 5.00
+final    requested      10: actual   10.00x (100.0% of request), SIH reports 10.00
+final    requested      20: actual   20.00x (100.0% of request), SIH reports 20.00
+final    requested      40: actual   40.00x (100.0% of request), SIH reports 40.00
+stock    requested     0.5: achieved 0.5, retries 0 in 8 s, median interval None s, abort at None s 
+stock    requested       1: achieved 1.0, retries 0 in 8 s, median interval None s, abort at 5.02 s 
+stock    requested      10: achieved 10.0, retries 0 in 8 s, median interval None s, abort at 0.52 s 
+stock    requested     100: achieved 42.61, retries 0 in 8 s, median interval None s, abort at 0.14 s 
+stock    requested  100000: achieved 38.87, retries 0 in 8 s, median interval None s, abort at 0.15 s 
+final    requested     0.5: achieved 0.5, retries 0 in 8 s, median interval None s, abort at 5.01 s 
+final    requested       1: achieved 1.0, retries 0 in 8 s, median interval None s, abort at 5.02 s 
+final    requested      10: achieved 10.0, retries 0 in 8 s, median interval None s, abort at 5.01 s 
+final    requested     100: achieved 48.59, retries 0 in 8 s, median interval None s, abort at 5.01 s 
+final    requested  100000: achieved 51.9, retries 0 in 8 s, median interval None s, abort at 5.0 s 
+22:01:33 FOCUSED DONE
+22:04:10 tests build ok
+22:04:10 unit-WhiteGaussianNoise exit 0 : [  PASSED  ] 8 tests. 
+22:04:14 functional-SihPhysics exit 0 : [  PASSED  ] 8 tests. 
+22:04:18 functional-SensorGpsSim exit 0 : [  PASSED  ] 2 tests. 
+22:04:22 functional-LogWriterFile exit 0 : [  PASSED  ] 1 test. 
+quadcopter: state hash e88300c0e9b4bf85
+quadcopter_wind: state hash bf66262ac7db1c10
+hexacopter: state hash c0c527025c755feb
+fixed_wing: state hash 24c62b063cc612e4
+tailsitter: state hash 00ab022cbf249f94
+standard_vtol: state hash aef737dd0b087e67
+rover: state hash b7cb82c85750a646
+22:04:22 TESTS DONE
+stock-root run 0 exit 0 flight 2.412 sync 0
+final-root run 0 exit 0 flight 1.647 sync 0
+stock-user run 0 exit 0 flight 3.332 sync 0
+final-user run 0 exit 0 flight 1.564 sync 0
+bothx-user run 0 exit 0 flight 1.207 sync 0
+inline-user run 0 exit 0 flight 0.975 sync 0
+stock-root run 1 exit 0 flight 2.346 sync 0
+final-root run 1 exit 0 flight 1.674 sync 0
+stock-user run 1 exit 0 flight 4.101 sync 0
+final-user run 1 exit 0 flight 1.806 sync 0
+bothx-user run 1 exit 0 flight 1.046 sync 0
+inline-user run 1 exit 0 flight 0.997 sync 0
+stock-root run 2 exit 0 flight 2.418 sync 0
+final-root run 2 exit 0 flight 1.421 sync 0
+stock-user run 2 exit 0 flight 3.431 sync 0
+final-user run 2 exit 0 flight 1.640 sync 0
+bothx-user run 2 exit 0 flight 1.256 sync 0
+inline-user run 2 exit 0 flight 0.795 sync 0
+stock-root run 3 exit 0 flight 2.406 sync 0
+final-root run 3 exit 0 flight 1.495 sync 0
+stock-user run 3 exit 0 flight 3.230 sync 0
+final-user run 3 exit 0 flight 1.712 sync 0
+bothx-user run 3 exit 0 flight 1.046 sync 0
+inline-user run 3 exit 0 flight 0.749 sync 0
+stock-root run 4 exit 0 flight 2.192 sync 0
+final-root run 4 exit 0 flight 1.612 sync 0
+stock-user run 4 exit 0 flight 3.255 sync 0
+final-user run 4 exit 0 flight 1.713 sync 0
+bothx-user run 4 exit 0 flight 1.237 sync 0
+inline-user run 4 exit 0 flight 0.789 sync 0
+22:06:58 FLIGHTS DONE

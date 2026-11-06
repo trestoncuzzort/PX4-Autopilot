@@ -1,0 +1,24 @@
+8254389aaa fix(logger): retry a failed log write in host time
+built snap-next6
+w-plain speed 10 run 0 exit 0 flight 8.405 elapsed 11.74 user 4.89 sys 3.89 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+w-gusty speed 10 run 0 exit 0 flight 8.532 elapsed 11.27 user 4.66 sys 3.64 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+w-batch speed 1000 run 0 exit 0 flight 0.565 elapsed 2.98 user 2.01 sys 1.51 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-inline speed 1000 run 0 exit 0 flight 0.367 elapsed 2.87 user 2.10 sys 1.09 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+w-default speed 1000 run 0 exit 0 flight 1.096 elapsed 3.82 user 2.42 sys 2.51 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-batch speed 1000 run 1 exit 0 flight 0.657 elapsed 3.27 user 2.25 sys 1.58 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-inline speed 1000 run 1 exit 0 flight 0.396 elapsed 2.98 user 2.20 sys 1.13 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+w-default speed 1000 run 1 exit 0 flight 1.112 elapsed 3.91 user 2.50 sys 2.53 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-batch speed 1000 run 2 exit 0 flight 0.671 elapsed 3.24 user 2.27 sys 1.55 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-inline speed 1000 run 2 exit 0 flight 0.444 elapsed 3.06 user 2.26 sys 1.17 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-default speed 1000 run 2 exit 0 flight 1.107 elapsed 3.90 user 2.50 sys 2.50 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-batch speed 1000 run 3 exit 1 flight none elapsed 2.68 user 1.93 sys 1.02 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: FAIL
+w-inline speed 1000 run 3 exit 0 flight 0.431 elapsed 3.25 user 2.40 sys 1.20 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+w-default speed 1000 run 3 exit 0 flight 1.184 elapsed 3.98 user 2.62 sys 2.52 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-batch speed 1000 run 4 exit 0 flight 0.649 elapsed 3.37 user 2.34 sys 1.57 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+w-inline speed 1000 run 4 exit 0 flight 0.444 elapsed 3.11 user 2.30 sys 1.18 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+w-default speed 1000 run 4 exit 0 flight 1.100 elapsed 3.92 user 2.52 sys 2.45 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+tests exit 2 (attempt 1)
+FAILED: [code=1] src/modules/simulation/simulator_sih/CMakeFiles/functional-SihPhysics.dir/SihPhysicsTest.cpp.o 
+/Users/t/sih-work/px4/src/modules/simulation/simulator_sih/SihPhysicsTest.cpp:287:43: fatal error: implicit conversion i
+GTEST DONE
+MAC NEXT6 DONE

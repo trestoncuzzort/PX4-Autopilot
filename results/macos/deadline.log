@@ -1,0 +1,16 @@
+sim      requested     0.5: achieved 0.5, retries 12 in 8 s, median interval 0.623 s, abort at None s 
+sim      requested       1: achieved 1.0, retries 19 in 8 s, median interval 0.314 s, abort at 6.13 s 
+sim      requested      10: achieved 10.0, retries 18 in 8 s, median interval 0.032 s, abort at 0.62 s 
+sim      requested     100: achieved 78.78, retries 5 in 8 s, median interval 0.01 s, abort at 0.06 s 
+sim      requested  100000: achieved 78.1, retries 4 in 8 s, median interval 0.012 s, abort at 0.06 s 
+scaled   requested     0.5: achieved 0.5, retries 13 in 8 s, median interval 0.617 s, abort at None s 
+scaled   requested       1: achieved 1.0, retries 19 in 8 s, median interval 0.316 s, abort at 6.13 s 
+scaled   requested      10: achieved 10.0, retries 19 in 8 s, median interval 0.306 s, abort at 6.01 s 
+scaled   requested     100: achieved 78.81, retries 19 in 8 s, median interval 0.299 s, abort at 5.88 s 
+scaled   requested  100000: achieved 76.37, retries 0 in 8 s, median interval None s, abort at None s 
+host     requested     0.5: achieved 0.5, retries 18 in 8 s, median interval 0.272 s, abort at 5.01 s 
+host     requested       1: achieved 1.0, retries 18 in 8 s, median interval 0.263 s, abort at 5.01 s 
+host     requested      10: achieved 10.0, retries 19 in 8 s, median interval 0.254 s, abort at 5.0 s 
+host     requested     100: achieved 79.52, retries 19 in 8 s, median interval 0.257 s, abort at 5.01 s 
+host     requested  100000: achieved 78.35, retries 19 in 8 s, median interval 0.252 s, abort at 5.0 s 
+DEADLINE DONE

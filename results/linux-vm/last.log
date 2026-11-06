@@ -1,0 +1,57 @@
+22:25:50 tree at dbe4372f7a style(mavlink): format mavlink_link_time.h, dbe4372f7abe78a3e1c8b51353ac0c734d996061
+22:26:17 SIH BUILT
+holdwrite  run 0: while held dropouts: 3, takeoff command returned True, simulated time 194.864 -> 369.208: advancing
+holdwrite  run 1: while held dropouts: 1, takeoff command returned True, simulated time 196.784 -> 371.604: advancing
+holdwrite  run 2: while held dropouts: 5, takeoff command returned True, simulated time 174.76 -> 327.792: advancing
+failwrite  run 0: while held dropouts: 2, takeoff command returned True, simulated time 197.224 -> 369.752: advancing
+failwrite  run 1: while held dropouts: 3, takeoff command returned True, simulated time 173.348 -> 329.312: advancing
+failwrite  run 2: while held dropouts: 2, takeoff command returned True, simulated time 181.036 -> 339.108: advancing
+last     requested     0.5: actual    0.50x (100.1% of request), SIH reports 0.50
+last     requested       1: actual    1.00x (100.0% of request), SIH reports 1.00
+last     requested       5: actual    5.00x (100.0% of request), SIH reports 5.00
+last     requested      10: actual   10.00x (100.0% of request), SIH reports 10.00
+last     requested      20: actual   20.00x (100.0% of request), SIH reports 20.04
+last     requested      40: actual   40.00x (100.0% of request), SIH reports 39.96
+22:28:25 unit-WhiteGaussianNoise exit 0 : [  PASSED  ] 8 tests. 
+22:28:29 functional-SihPhysics exit 0 : [  PASSED  ] 10 tests. 
+22:28:33 functional-SensorGpsSim exit 0 : [  PASSED  ] 2 tests. 
+22:28:35 functional-LogWriterFile exit 0 : [  PASSED  ] 1 test. 
+quadcopter: state hash e88300c0e9b4bf85
+quadcopter_wind: state hash bf66262ac7db1c10
+hexacopter: state hash c0c527025c755feb
+fixed_wing: state hash 24c62b063cc612e4
+tailsitter: state hash 00ab022cbf249f94
+standard_vtol: state hash aef737dd0b087e67
+rover: state hash b7cb82c85750a646
+22:28:35 TESTS DONE
+stock-root run 0 exit 0 flight 2.270 sync 0
+tip-root run 0 exit 0 flight 1.440 sync 0
+stock-user run 0 exit 0 flight 3.447 sync 0
+tip-user run 0 exit 0 flight 1.810 sync 0
+batch-user run 0 exit 0 flight 1.222 sync 0
+inline-user run 0 exit 0 flight 1.085 sync 0
+stock-root run 1 exit 0 flight 2.183 sync 0
+tip-root run 1 exit 0 flight 1.632 sync 0
+stock-user run 1 exit 0 flight 3.358 sync 0
+tip-user run 1 exit 0 flight 1.751 sync 0
+batch-user run 1 exit 0 flight 1.042 sync 0
+inline-user run 1 exit 1 flight none sync 0
+stock-root run 2 exit 0 flight 2.281 sync 0
+tip-root run 2 exit 0 flight 1.657 sync 0
+stock-user run 2 exit 0 flight 4.197 sync 0
+tip-user run 2 exit 0 flight 1.753 sync 0
+batch-user run 2 exit 0 flight 1.035 sync 0
+inline-user run 2 exit 0 flight 1.040 sync 0
+stock-root run 3 exit 0 flight 2.349 sync 0
+tip-root run 3 exit 0 flight 1.436 sync 0
+stock-user run 3 exit 0 flight 3.534 sync 0
+tip-user run 3 exit 0 flight 1.790 sync 0
+batch-user run 3 exit 0 flight 1.155 sync 0
+inline-user run 3 exit 0 flight 1.032 sync 0
+stock-root run 4 exit 0 flight 2.309 sync 0
+tip-root run 4 exit 0 flight 1.471 sync 0
+stock-user run 4 exit 0 flight 3.580 sync 0
+tip-user run 4 exit 0 flight 1.796 sync 0
+batch-user run 4 exit 0 flight 1.268 sync 0
+inline-user run 4 exit 0 flight 0.913 sync 0
+22:31:15 FLIGHTS DONE

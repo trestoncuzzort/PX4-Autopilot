@@ -1,0 +1,27 @@
+4b9737acba fix(logger): retry a failed log write in host time
+tests exit 2 (attempt 1)
+FAILED: [code=1] src/modules/simulation/simulator_sih/CMakeFiles/functional-SihPhysics.dir/SihPhysicsTest.cpp.o 
+/Users/t/sih-work/px4/src/modules/simulation/simulator_sih/SihPhysicsTest.cpp:296:43: fatal error: implicit conversion i
+GTEST DONE
+built snap-next7
+z-stock speed 1000 run 0 exit 0 flight 1.570 elapsed 4.20 user 2.91 sys 3.99 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-default speed 1000 run 0 exit 0 flight 1.071 elapsed 3.94 user 2.34 sys 2.33 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-batch speed 1000 run 0 exit 0 flight 0.664 elapsed 3.21 user 2.23 sys 1.50 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-inline speed 1000 run 0 exit 0 flight 0.395 elapsed 2.98 user 2.21 sys 1.12 px4r 0 sync 0 sdkr 0 sdkx 0; Overall result: PASS
+z-stock speed 1000 run 1 exit 0 flight 1.634 elapsed 4.34 user 3.15 sys 4.16 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-default speed 1000 run 1 exit 0 flight 1.107 elapsed 3.92 user 2.51 sys 2.50 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-batch speed 1000 run 1 exit 0 flight 0.670 elapsed 3.28 user 2.29 sys 1.56 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-inline speed 1000 run 1 exit 0 flight 0.437 elapsed 3.07 user 2.28 sys 1.17 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-stock speed 1000 run 2 exit 0 flight 1.662 elapsed 4.36 user 3.19 sys 4.15 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-default speed 1000 run 2 exit 0 flight 1.165 elapsed 3.99 user 2.59 sys 2.63 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-batch speed 1000 run 2 exit 0 flight 0.675 elapsed 3.29 user 2.32 sys 1.54 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-inline speed 1000 run 2 exit 0 flight 0.445 elapsed 3.10 user 2.32 sys 1.18 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-stock speed 1000 run 3 exit 0 flight 1.677 elapsed 4.39 user 3.19 sys 4.12 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-default speed 1000 run 3 exit 0 flight 1.117 elapsed 3.97 user 2.56 sys 2.55 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-batch speed 1000 run 3 exit 0 flight 0.657 elapsed 3.39 user 2.36 sys 1.59 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-inline speed 1000 run 3 exit 0 flight 0.435 elapsed 3.11 user 2.32 sys 1.19 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-stock speed 1000 run 4 exit 0 flight 1.688 elapsed 4.43 user 3.25 sys 4.22 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-default speed 1000 run 4 exit 0 flight 1.122 elapsed 3.98 user 2.57 sys 2.56 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-batch speed 1000 run 4 exit 0 flight 0.649 elapsed 3.38 user 2.36 sys 1.58 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+z-inline speed 1000 run 4 exit 0 flight 0.443 elapsed 3.12 user 2.33 sys 1.20 px4r 0 sync 0 sdkr 1 sdkx 0; Overall result: PASS
+MAC NEXT7 DONE
