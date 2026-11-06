@@ -196,6 +196,69 @@ protected:
 		}
 	}
 
+	void check_imu_bias()
+	{
+		param_reset_all();
+		const int32_t seed = 587;
+		ASSERT_EQ(param_set_no_notification(param_find("SIM_NOISE_SEED"), &seed), PX4_OK);
+		set_param("SIH_ACC_NOISE", 0.f);
+		set_param("SIH_GYRO_NOISE", 0.f);
+		set_param("SIH_ACC_BIAS", 0.5f);
+		set_param("SIH_GYRO_BIAS", 0.02f);
+		set_param("SIH_IMU_BIAS_TC", 2.f);
+		Sih sih;
+		sih.updateParams();
+		sih._q_E = matrix::Quatf{};
+		sih._specific_force_E = matrix::Vector3f(0.f, 0.f, 0.f);
+		uORB::Subscription accel_sub{ORB_ID(sensor_accel)};
+		uORB::Subscription gyro_sub{ORB_ID(sensor_gyro)};
+
+		// A new subscription starts at the oldest queued sample, left over from any earlier test.
+		sensor_accel_s old_accel{};
+		sensor_gyro_s old_gyro{};
+
+		while (accel_sub.update(&old_accel)) {}
+
+		while (gyro_sub.update(&old_gyro)) {}
+
+		constexpr int samples = 200000;
+		double accel_square = 0.0;
+		double accel_lag = 0.0;
+		double gyro_square = 0.0;
+		float previous = 0.f;
+		uint64_t time = 0;
+
+		for (int i = 0; i < samples; ++i) {
+			sih.reconstruct_sensors_signals(time += 4000);
+			sensor_accel_s accel{};
+			sensor_gyro_s gyro{};
+			ASSERT_TRUE(accel_sub.update(&accel));
+			ASSERT_TRUE(gyro_sub.update(&gyro));
+			accel_square += (double)accel.x * (double)accel.x;
+			accel_lag += (double)accel.x * (double)previous;
+			gyro_square += (double)gyro.y * (double)gyro.y;
+			previous = accel.x;
+		}
+
+		// 800 simulated seconds at a 2 s correlation time, so the estimates are good to about 5%.
+		const double accel_variance = accel_square / samples;
+		EXPECT_NEAR(sqrt(accel_variance), 0.5, 0.1);
+		EXPECT_NEAR(accel_lag / samples / accel_variance, exp(-0.004 / 2.0), 0.001);
+		EXPECT_NEAR(sqrt(gyro_square / samples), 0.02, 0.004);
+
+		// Setting it to zero removes the bias at once.
+		set_param("SIH_ACC_BIAS", 0.f);
+		set_param("SIH_GYRO_BIAS", 0.f);
+		sih.updateParams();
+		sih.reconstruct_sensors_signals(time += 4000);
+		sensor_accel_s accel{};
+		sensor_gyro_s gyro{};
+		ASSERT_TRUE(accel_sub.update(&accel));
+		ASSERT_TRUE(gyro_sub.update(&gyro));
+		EXPECT_FLOAT_EQ(accel.x, 0.f);
+		EXPECT_FLOAT_EQ(gyro.y, 0.f);
+	}
+
 private:
 	static void check(const Sih &sih, const Checkpoint &expected, const char *name, int step)
 	{
@@ -330,6 +393,11 @@ TEST_F(SihPhysicsTest, Quadcopter)
 TEST_F(SihPhysicsTest, ImuNoiseCanChangeWithoutResettingStreams)
 {
 	check_imu_noise_controls();
+}
+
+TEST_F(SihPhysicsTest, ImuBiasHasConfiguredSizeAndCorrelation)
+{
+	check_imu_bias();
 }
 
 TEST_F(SihPhysicsTest, QuadcopterInWind)

@@ -51,6 +51,8 @@ enum class NoiseStream : uint32_t {
 	GpsVelocity = 8,
 	AuxiliaryPosition = 9,
 	DifferentialPressure = 10,
+	AccelerometerBias = 11,
+	GyroscopeBias = 12,
 };
 
 class SensorNoise : public math::GaussianNoise

@@ -811,11 +811,30 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 		gyro_noise = _gyro_noise.vector(0.01f, 0.01f, 0.01f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 	}
 
+	// First-order Gauss-Markov bias with exact discretisation, so its size does not depend on the step.
+	const float accel_bias_std = fmaxf(_sih_acc_bias.get(), 0.f);
+	const float gyro_bias_std = fmaxf(_sih_gyro_bias.get(), 0.f);
+
+	if ((accel_bias_std > 0.f || gyro_bias_std > 0.f) && (_imu_bias_time_us != 0)) {
+		const float decay = expf(-1e-6f * (float)(time_now_us - _imu_bias_time_us) / fmaxf(_sih_imu_bias_tc.get(), 1.f));
+		const float drive = sqrtf(1.f - decay * decay);
+
+		if (accel_bias_std > 0.f) {
+			_accel_bias_state = _accel_bias_state * decay + _accel_bias_noise.vector(drive, drive, drive);
+		}
+
+		if (gyro_bias_std > 0.f) {
+			_gyro_bias_state = _gyro_bias_state * decay + _gyro_bias_noise.vector(drive, drive, drive);
+		}
+	}
+
+	_imu_bias_time_us = time_now_us;
+
 	Vector3f specific_force_B = R_E2B * _specific_force_E;
-	Vector3f accel = specific_force_B + accel_noise;
+	Vector3f accel = specific_force_B + accel_noise + _accel_bias_state * accel_bias_std;
 
 	const Vector3f earth_spin_rate_B = R_E2B * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE);
-	Vector3f gyro = _w_B + earth_spin_rate_B + gyro_noise;
+	Vector3f gyro = _w_B + earth_spin_rate_B + gyro_noise + _gyro_bias_state * gyro_bias_std;
 
 	// update IMU every iteration
 	if (!_accel_blocked) {

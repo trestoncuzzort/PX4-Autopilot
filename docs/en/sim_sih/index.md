@@ -176,9 +176,10 @@ It applies only to SIH running as SITL and is off unless the value is exactly `1
 
 #### Running Several Simulations
 
-Run batch simulations as a normal user, not as root.
-As root every PX4 thread gets real-time scheduling (`SCHED_FIFO`), which has no benefit for simulated time.
-With many instances those threads also starve the startup scripts and other programs, and startup can take over a minute.
+Run several simulations at once as a normal user, not as root.
+As root every PX4 thread gets real-time scheduling (`SCHED_FIFO`).
+With many instances those threads starve the startup scripts and other programs, startup can take over a minute, and total throughput is lower.
+With a single instance it makes little difference.
 This does not apply in a container without `CAP_SYS_NICE`.
 
 Holding an instance to one CPU slows it down, so leave CPU placement to the operating system.
@@ -193,6 +194,8 @@ These parameters take effect while the simulation is running:
 | ------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
 | `SIH_ACC_NOISE`                       | 1.0        | Multiplies the accelerometer noise of 0.1 m/s^2 per axis                                 |
 | `SIH_GYRO_NOISE`                      | 1.0        | Multiplies the gyroscope noise of 0.01 rad/s per axis                                    |
+| `SIH_ACC_BIAS`, `SIH_GYRO_BIAS`       | 0.0        | Standard deviation of a slowly drifting IMU bias, in m/s^2 and rad/s                     |
+| `SIH_IMU_BIAS_TC`                     | 300        | Correlation time of the IMU bias in s                                                    |
 | `SIH_ARSP_NOISE`                      | 0.2        | True airspeed standard deviation in m/s                                                  |
 | `SIH_RNGBC_NOISE`                     | 30.0       | Ranging beacon standard deviation in m                                                   |
 | `SIM_BARO_NOISE`                      | 0.01       | Barometer standard deviation in hPa                                                      |
