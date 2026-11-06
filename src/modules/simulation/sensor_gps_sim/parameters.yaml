@@ -22,3 +22,21 @@ parameters:
       default: 10
       min: 0
       max: 50
+    SIM_GPS_P_NOISE:
+      description:
+        short: GPS position noise scale
+        long: >-
+          Scales the output of the existing correlated position noise model. Zero removes its contribution immediately while retaining the underlying noise state. Reported accuracy is unchanged.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3
+    SIM_GPS_V_NOISE:
+      description:
+        short: GPS velocity noise scale
+        long: >-
+          Scales the output of the existing correlated velocity noise model. Zero removes its contribution immediately while retaining the underlying noise state. Reported accuracy is unchanged.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3

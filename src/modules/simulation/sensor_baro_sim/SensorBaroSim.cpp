@@ -43,7 +43,6 @@ SensorBaroSim::SensorBaroSim() :
 	ModuleParams(nullptr),
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::hp_default)
 {
-	srand(1234); // initialize the random seed once before calling math::generate_wgn()
 }
 
 SensorBaroSim::~SensorBaroSim()
@@ -121,7 +120,7 @@ void SensorBaroSim::Run()
 			const float absolute_pressure = pressure_msl / pressure_ratio;
 
 			// Apply noise and drift
-			const float abs_pressure_noise = 1.f * math::generate_wgn();  // 1 Pa RMS noise
+			const float abs_pressure_noise = _noise.sample() * (100.f * fmaxf(_sim_baro_noise.get(), 0.f)); // hPa to Pa
 			_baro_drift_pa += _baro_drift_pa_per_sec * dt;
 			const float absolute_pressure_noisy = absolute_pressure + abs_pressure_noise + _baro_drift_pa;
 

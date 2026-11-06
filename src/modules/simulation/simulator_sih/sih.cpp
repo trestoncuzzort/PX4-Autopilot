@@ -58,7 +58,6 @@ ModuleBase::Descriptor Sih::desc{task_spawn, custom_command, print_usage};
 Sih::Sih() :
 	ModuleParams(nullptr)
 {
-	srand(1234); // initialize the random seed once before calling math::generate_wgn()
 }
 
 Sih::~Sih()
@@ -771,13 +770,13 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	Vector3f gyro_noise;
 
 	if (false && _T_B.longerThan(FLT_EPSILON)) { // too much noise at least for the low update rate O.O
-		accel_noise = math::noiseGauss3f(0.5f, 1.7f, 1.4f);
-		gyro_noise = math::noiseGauss3f(0.14f, 0.07f, 0.03f);
+		accel_noise = _accel_noise.vector(0.5f, 1.7f, 1.4f) * fmaxf(_sih_acc_noise.get(), 0.f);
+		gyro_noise = _gyro_noise.vector(0.14f, 0.07f, 0.03f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 
 	} else {
 		// Lower noise when not armed
-		accel_noise = math::noiseGauss3f(0.1f, 0.1f, 0.1f);
-		gyro_noise = math::noiseGauss3f(0.01f, 0.01f, 0.01f);
+		accel_noise = _accel_noise.vector(0.1f, 0.1f, 0.1f) * fmaxf(_sih_acc_noise.get(), 0.f);
+		gyro_noise = _gyro_noise.vector(0.01f, 0.01f, 0.01f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 	}
 
 	Vector3f specific_force_B = R_E2B * _specific_force_E;
@@ -813,7 +812,7 @@ void Sih::send_airspeed(const hrt_abstime &time_now_us)
 
 	const Vector3f v_apparent_B = _q.rotateVectorInverse(_v_apparent_N);
 	const float v_pitot = (_vehicle == VehicleType::TailsitterVTOL) ? -v_apparent_B(2) : v_apparent_B(0);
-	airspeed.true_airspeed_m_s = fmaxf(0.1f, v_pitot + math::generate_wgn() * 0.2f);
+	airspeed.true_airspeed_m_s = fmaxf(0.1f, v_pitot + _airspeed_noise.sample() * fmaxf(_sih_arsp_noise.get(), 0.f));
 	airspeed.indicated_airspeed_m_s = airspeed.true_airspeed_m_s * sqrtf(_wing_l.get_rho() / RHO);
 	airspeed.confidence = 0.7f;
 	airspeed.timestamp = hrt_absolute_time();
@@ -866,7 +865,7 @@ void Sih::send_ranging_beacon(const hrt_abstime &time_now_us)
 		const double true_range_m = delta_ecef.norm();
 
 		const float noise_std = _sih_ranging_beacon_noise.get();
-		const float noise_m = (noise_std > 0.f) ? math::generate_wgn() * noise_std : 0.f;
+		const float noise_m = _beacon_noise.sample() * fmaxf(noise_std, 0.f);
 		const double measured_range_m = math::max(0.0, true_range_m + static_cast<double>(noise_m));
 
 		ranging_beacon_s msg{};

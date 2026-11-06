@@ -45,3 +45,5 @@ px4_add_module(
 		failure_injection
 		px4_work_queue
 	)
+
+px4_add_functional_gtest(SRC SensorGpsSimTest.cpp LINKLIBS modules__simulation__sensor_gps_sim)

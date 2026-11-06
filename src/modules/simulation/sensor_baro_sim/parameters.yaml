@@ -26,3 +26,13 @@ parameters:
       type: float
       default: 0.0
       unit: celcius
+    SIM_BARO_NOISE:
+      description:
+        short: Barometer pressure noise standard deviation
+        long: >-
+          Additive Gaussian pressure noise, separate from the configured pressure offset and failure injection.
+      type: float
+      default: 0.01
+      min: 0.0
+      decimal: 4
+      unit: hPa

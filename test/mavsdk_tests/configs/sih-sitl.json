@@ -6,6 +6,11 @@
     [
         {
             "model": "quadx",
+            "test_filter": "sih_noise",
+            "timeout_min": 1
+        },
+        {
+            "model": "quadx",
             "test_filter": "vision_target",
             "timeout_min": 3,
             "env": {

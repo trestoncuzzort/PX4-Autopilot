@@ -113,6 +113,37 @@ SIH supports faster-than-realtime simulation via the `PX4_SIM_SPEED_FACTOR` envi
 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 ```
 
+#### Sensor Noise
+
+Each simulated sensor draws from its own random stream, so changing one sensor's noise or sample rate does not change another's.
+These parameters take effect while the simulation is running:
+
+| Parameter                             | Default    | Effect                                                                                   |
+| ------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `SIH_ACC_NOISE`                       | 1.0        | Multiplies the accelerometer noise of 0.1 m/s^2 per axis                                 |
+| `SIH_GYRO_NOISE`                      | 1.0        | Multiplies the gyroscope noise of 0.01 rad/s per axis                                    |
+| `SIH_ARSP_NOISE`                      | 0.2        | True airspeed standard deviation in m/s                                                  |
+| `SIH_RNGBC_NOISE`                     | 30.0       | Ranging beacon standard deviation in m                                                   |
+| `SIM_BARO_NOISE`                      | 0.01       | Barometer standard deviation in hPa                                                      |
+| `SIM_MAG_NOISE`                       | 1.0        | Multiplies the magnetometer noise of 0.02, 0.02 and 0.03 gauss                           |
+| `SIM_GPS_P_NOISE`, `SIM_GPS_V_NOISE`  | 1.0        | Multiply the correlated GPS position and velocity noise, keeping its correlation in time |
+| `SIM_AGP_N_H`, `SIM_AGP_N_V`          | 2.0, 0.5   | Auxiliary global position horizontal and vertical standard deviation in m                |
+| `SIM_ARSP_NOISE`                      | 0.01       | Differential pressure standard deviation in hPa                                          |
+
+With `SIH_ACC_NOISE` or `SIH_GYRO_NOISE` at zero a stationary vehicle's IMU repeats one value, which PX4 reports as a stale sensor.
+Use a small value instead when the vehicle is on the ground.
+
+`SIM_NOISE_SEED` seeds all the streams at startup.
+Give each run and each vehicle its own seed if their noise should be independent:
+
+```sh
+PX4_PARAM_SIM_NOISE_SEED=7 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+A seed repeats the samples of each stream.
+It does not make a whole flight repeatable, since closed-loop timing also depends on the host.
+A secondary GPS copies the primary GPS noise rather than having its own stream.
+
 #### Wind Simulation
 
 SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.

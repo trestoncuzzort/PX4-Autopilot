@@ -13,3 +13,15 @@ parameters:
       reboot_required: true
       min: 0
       max: 1
+- group: Simulator
+  definitions:
+    SIM_ARSP_NOISE:
+      description:
+        short: Differential pressure noise standard deviation
+        long: >-
+          Additive Gaussian differential pressure noise before pitot blockage scaling.
+      type: float
+      default: 0.01
+      min: 0.0
+      decimal: 4
+      unit: hPa

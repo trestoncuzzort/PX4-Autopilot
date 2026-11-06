@@ -381,3 +381,43 @@ parameters:
       default: 6000.0
       min: 0.1
       decimal: 1
+    SIM_NOISE_SEED:
+      description:
+        short: Simulation sensor noise seed
+        long: >-
+          Seeds independent random streams in SIH and the sensor_*_sim modules at startup.
+          Use the same seed to repeat each stream's samples, or different seeds across test runs and vehicles.
+          A repeatable noise stream does not guarantee identical closed-loop flight timing.
+      type: int32
+      default: 1234
+      min: 0
+      max: 2147483647
+      reboot_required: true
+    SIH_ACC_NOISE:
+      description:
+        short: Accelerometer noise scale
+        long: >-
+          Scales the existing per-axis additive Gaussian IMU noise. Zero removes the additive noise.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3
+    SIH_GYRO_NOISE:
+      description:
+        short: Gyroscope noise scale
+        long: >-
+          Scales the existing per-axis additive Gaussian IMU noise. Zero removes the additive noise.
+      type: float
+      default: 1.0
+      min: 0.0
+      decimal: 3
+    SIH_ARSP_NOISE:
+      description:
+        short: SIH true airspeed noise standard deviation
+        long: >-
+          Additive Gaussian noise on true airspeed before the minimum airspeed clamp.
+      type: float
+      default: 0.2
+      min: 0.0
+      decimal: 3
+      unit: m/s

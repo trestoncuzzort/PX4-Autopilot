@@ -28,3 +28,23 @@ parameters:
       default: 0
       min: 0
       max: 3
+    SIM_AGP_N_H:
+      description:
+        short: AGP horizontal noise standard deviation
+        long: >-
+          Additive Gaussian noise on each horizontal position axis.
+      type: float
+      default: 2.0
+      min: 0.0
+      decimal: 3
+      unit: m
+    SIM_AGP_N_V:
+      description:
+        short: AGP vertical noise standard deviation
+        long: >-
+          Additive Gaussian noise on altitude.
+      type: float
+      default: 0.5
+      min: 0.0
+      decimal: 3
+      unit: m
