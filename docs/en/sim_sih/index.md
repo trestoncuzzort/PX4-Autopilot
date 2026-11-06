@@ -116,6 +116,8 @@ PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 The speed factor is a requested pacing limit.
 The achieved rate depends on the host, active modules, and logging load.
 Increasing it does not change the physics timestep or guarantee that the host reaches the requested rate.
+External clients still run on wall time, while PX4 mission-transfer timeouts use simulation time.
+If mission uploads time out at high speed factors, reduce the requested speed.
 
 #### Offboard-Only MAVLink Links
 
@@ -127,7 +129,7 @@ PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 
 This starts only the API/offboard MAVLink link, using its usual instance-specific ports.
 It skips the separate GCS, camera, gimbal, and Hawkeye display links and their worker threads.
-Logging and the physics model retain their usual configuration.
+Logging remains enabled according to `SDLOG_MODE` and `SDLOG_BACKEND`.
 Leave `PX4_SIH_OFFBOARD_ONLY` unset when those additional links are needed.
 The setting applies only to SIH running as SITL.
 
