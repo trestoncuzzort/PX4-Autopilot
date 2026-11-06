@@ -16,7 +16,8 @@ See [PX4 Simulation QuickStart](../simulation/px4_simulation_quickstart.md) for 
 SIH runs as a PX4 module that replaces real sensor and actuator hardware with a simulated physics model.
 It provides simulated IMU, GPS, barometer, magnetometer, and airspeed sensor data via uORB, and reads actuator outputs to update the vehicle state at each timestep.
 
-The simulation runs in lockstep with PX4, ensuring deterministic and reproducible results.
+In SITL, lockstep coordinates simulation time with PX4's work queues.
+Identical closed-loop results also depend on random-number state, external inputs, and scheduling; lockstep alone does not guarantee them.
 It also integrates seamlessly with ROS 2 with no additional configuration (see [ROS 2 Integration](#ros-2-integration) below).
 
 Two modes are supported:
@@ -114,6 +115,7 @@ PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 ```
 
 The speed factor is a requested pacing limit.
+Invalid speed factors produce a warning and use normal speed (`1`).
 The achieved rate depends on the host, active modules, and logging load.
 Increasing it does not change the physics timestep or guarantee that the host reaches the requested rate.
 External clients still run on wall time, while PX4 mission-transfer timeouts use simulation time.
@@ -133,10 +135,6 @@ Logging remains enabled according to `SDLOG_MODE` and `SDLOG_BACKEND`.
 Leave `PX4_SIH_OFFBOARD_ONLY` unset when those additional links are needed.
 The setting applies only to SIH running as SITL.
 
-#### Wind Simulation
-
-SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
-
 #### Single Work Queue
 
 For batch runs where thread wake-ups are expensive, `PX4_SIM_WQ_SINGLE=1` runs every work item on one thread, instead of one thread per work queue:
@@ -149,6 +147,24 @@ This removes the hand-offs between queue threads, so simulated time can pass fas
 It also runs work one item at a time that a flight controller would run by priority, and a work item that blocks holds up all the others.
 It does not model flight hardware scheduling, so do not use it to evaluate timing.
 The setting applies only to lockstep simulation and is off unless the value is exactly `1`.
+
+The two batch settings can be combined:
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+To check this configuration with the [MAVSDK integration tests](../test_and_ci/integration_testing_mavsdk.md):
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 test/mavsdk_tests/mavsdk_test_runner.py test/mavsdk_tests/configs/sih-sitl.json --speed-factor 10 --build-dir build/px4_sitl_sih
+```
+
+The SIH test configuration includes clock-progress checks for repeated accelerometer and gyroscope failures, a stopped rate controller, and failed parameter autosaves.
+
+#### Wind Simulation
+
+SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_N) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
 
 #### Set Custom Takeoff Location
 
