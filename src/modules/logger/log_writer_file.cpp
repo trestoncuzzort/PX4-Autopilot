@@ -433,8 +433,8 @@ void LogWriterFile::run()
 						/* subtract bytes written from number in buffer (count -= written) */
 						buffer.mark_read(written);
 
-						if (!buffer._should_run && written == static_cast<int>(available) && !is_part) {
-							/* Stop only when all data written */
+						// The producer can append while write_to_file() runs without _mtx.
+						if (!buffer._should_run && buffer.count() == 0) {
 							pthread_mutex_unlock(&_mtx);
 							buffer.close_file();
 							pthread_mutex_lock(&_mtx);
