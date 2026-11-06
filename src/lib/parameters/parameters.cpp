@@ -879,7 +879,12 @@ int param_save_default(bool blocking)
 
 			} else {
 				PX4_ERR("parameter export to %s failed (%d) attempt %d", filename, res, attempt);
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+				// Autosave holds a work queue's lockstep component, so simulated time cannot advance here.
+				system_usleep(10000);
+#else
 				px4_usleep(10000); // wait at least 10 milliseconds before trying again
+#endif
 			}
 		}
 

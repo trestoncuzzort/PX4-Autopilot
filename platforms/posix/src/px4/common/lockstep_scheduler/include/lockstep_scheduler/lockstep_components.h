@@ -34,9 +34,7 @@
 #pragma once
 
 #include <cstdint>
-#include <atomic>
-
-#include <px4_platform_common/sem.h>
+#include <pthread.h>
 
 /**
  * @class LockstepComponents
@@ -69,12 +67,11 @@ public:
 	void wait_for_components();
 
 private:
-	void release_waiter();
-
 	const bool _no_cleanup_on_destroy;
 
-	px4_sem_t _components_sem;
+	pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;
+	pthread_cond_t _condition = PTHREAD_COND_INITIALIZER;
 
-	std::atomic_int _components_used_bitset{0};
-	std::atomic_int _components_progress_bitset{0};
+	int _components_used_bitset{0};
+	int _components_progress_bitset{0};
 };

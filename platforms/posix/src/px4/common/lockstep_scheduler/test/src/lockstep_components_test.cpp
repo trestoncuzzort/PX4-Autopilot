@@ -36,7 +36,7 @@ private:
 
 } // namespace
 
-TEST(LockstepComponents, IdleComponentsBankAtMostOneRelease)
+TEST(LockstepComponents, IdleComponentsDoNotReleaseNewWork)
 {
 	LockstepComponents components;
 
@@ -46,21 +46,49 @@ TEST(LockstepComponents, IdleComponentsBankAtMostOneRelease)
 		components.unregister_component(components.register_component());
 	}
 
+	components.wait_for_components();
 	const int busy = components.register_component();
-	int passed_while_busy = 0;
+	Waiter waiter(components);
+	EXPECT_FALSE(waiter.returned_within(100ms));
+	components.unregister_component(busy);
+	EXPECT_TRUE(waiter.returned_within(5s));
+}
 
-	for (int i = 0; i < 3; ++i) {
-		Waiter waiter(components);
+TEST(LockstepComponents, ProgressIsConsumedOnce)
+{
+	LockstepComponents components;
+	const int persistent = components.register_component();
+	components.lockstep_progress(persistent);
+	components.lockstep_progress(persistent);
+	components.wait_for_components();
 
-		if (waiter.returned_within(100ms)) {
-			++passed_while_busy;
+	Waiter waiter(components);
+	EXPECT_FALSE(waiter.returned_within(100ms));
+	components.lockstep_progress(persistent);
+	EXPECT_TRUE(waiter.returned_within(5s));
+}
 
-		} else {
-			components.unregister_component(busy);
-			EXPECT_TRUE(waiter.returned_within(5s));
-			break;
-		}
-	}
+TEST(LockstepComponents, UnregisterPreservesOtherComponentsProgress)
+{
+	LockstepComponents components;
+	const int persistent = components.register_component();
+	const int transient = components.register_component();
+	components.lockstep_progress(persistent);
+	Waiter waiter(components);
+	EXPECT_FALSE(waiter.returned_within(100ms));
+	components.unregister_component(transient);
+	EXPECT_TRUE(waiter.returned_within(5s));
+}
 
-	EXPECT_LE(passed_while_busy, 1);
+TEST(LockstepComponents, NewComponentJoinsActiveCycle)
+{
+	LockstepComponents components;
+	const int first = components.register_component();
+	Waiter waiter(components);
+	EXPECT_FALSE(waiter.returned_within(100ms));
+	const int second = components.register_component();
+	components.unregister_component(first);
+	EXPECT_FALSE(waiter.returned_within(100ms));
+	components.unregister_component(second);
+	EXPECT_TRUE(waiter.returned_within(5s));
 }
