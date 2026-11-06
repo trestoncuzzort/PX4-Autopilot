@@ -48,6 +48,10 @@
 
 #include <drivers/drv_pwm_output.h>         // to get PWM flags
 #include <lib/drivers/device/Device.hpp>
+
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+#include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
+#endif
 #include <limits.h>
 
 using namespace math;
@@ -138,6 +142,12 @@ void Sih::lockstep_loop()
 	uint64_t report_simulation_time_us = 0;
 	uint64_t next_step_wall_time_us = 0;
 
+	const bool run_work_inline = px4::WorkQueueInlineRequested() && px4::WorkQueueInlineStart();
+
+	if (run_work_inline) {
+		PX4_INFO("Running timers and work items on the simulator thread");
+	}
+
 	while (!should_exit()) {
 		pre_compute_wall_time_us = micros();
 		perf_count(_loop_interval_perf);
@@ -147,9 +157,17 @@ void Sih::lockstep_loop()
 		abstime_to_ts(&ts, _current_simulation_time_us);
 		px4_clock_settime(CLOCK_MONOTONIC, &ts);
 
+		if (run_work_inline) {
+			px4_lockstep_run_timers();
+		}
+
 		perf_begin(_loop_perf);
 		sensor_step();
 		perf_end(_loop_perf);
+
+		if (run_work_inline) {
+			px4::WorkQueueInlineRun();
+		}
 
 		// Only do lock-step once we received the first actuator output
 		int interval_us = sim_interval_us;
@@ -1049,7 +1067,11 @@ int Sih::task_spawn(int argc, char *argv[])
 	desc.task_id = px4_task_spawn_cmd("sih",
 					  SCHED_DEFAULT,
 					  SCHED_PRIORITY_MAX,
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+					  px4::WorkQueueInlineRequested() ? 60000 : 1560,
+#else
 					  1560,
+#endif
 					  (px4_main_t)&run_trampoline,
 					  (char *const *)argv);
 

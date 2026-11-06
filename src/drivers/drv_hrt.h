@@ -239,12 +239,14 @@ __EXPORT extern void	hrt_ioctl_init(void);
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 
+__EXPORT extern void px4_lockstep_run_timers(void);
 __EXPORT extern int px4_lockstep_register_component(void);
 __EXPORT extern void px4_lockstep_unregister_component(int component);
 __EXPORT extern void px4_lockstep_progress(int component);
 __EXPORT extern void px4_lockstep_wait_for_components(void);
 
 #else
+static inline void px4_lockstep_run_timers(void) {}
 static inline int px4_lockstep_register_component(void) { return 0; }
 static inline void px4_lockstep_unregister_component(int component) { (void)component; }
 static inline void px4_lockstep_progress(int component) {(void)component; }
