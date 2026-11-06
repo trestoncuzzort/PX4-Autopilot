@@ -152,6 +152,8 @@ private:
 	matrix::Vector3f _accel_bias_state{_accel_bias_noise.vector(1.f, 1.f, 1.f)};
 	matrix::Vector3f _gyro_bias_state{_gyro_bias_noise.vector(1.f, 1.f, 1.f)};
 	uint64_t _imu_bias_time_us{0};
+	simulation::SensorNoise _wind_noise{simulation::NoiseStream::WindTurbulence};
+	matrix::Vector3f _wind_turbulence_state{_wind_noise.vector(1.f, 1.f, 1.f)}; // unit variance
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _actuator_out_sub{ORB_ID(actuator_outputs_sim)};
@@ -374,6 +376,9 @@ private:
 		(ParamInt<px4::params::SIH_VEHICLE_TYPE>) _sih_vtype,
 		(ParamFloat<px4::params::SIH_WIND_N>) _sih_wind_n,
 		(ParamFloat<px4::params::SIH_WIND_E>) _sih_wind_e,
+		(ParamFloat<px4::params::SIH_WIND_D>) _sih_wind_d,
+		(ParamFloat<px4::params::SIH_WIND_TURB>) _sih_wind_turb,
+		(ParamFloat<px4::params::SIH_WIND_TC>) _sih_wind_tc,
 		(ParamFloat<px4::params::SIH_RNGBC_NOISE>) _sih_ranging_beacon_noise
 	)
 };
