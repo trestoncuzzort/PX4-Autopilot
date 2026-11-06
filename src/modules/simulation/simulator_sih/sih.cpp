@@ -92,12 +92,12 @@ void Sih::run()
 }
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
-// Get current timestamp in microseconds
+// Pacing must use host time, independently of the simulated clock.
 static uint64_t micros()
 {
-	struct timeval t;
-	gettimeofday(&t, nullptr);
-	return t.tv_sec * ((uint64_t)1000000) + t.tv_usec;
+	struct timespec ts;
+	system_clock_gettime(CLOCK_MONOTONIC, &ts);
+	return uint64_t(ts.tv_sec) * 1'000'000 + ts.tv_nsec / 1'000;
 }
 
 void Sih::lockstep_loop()
@@ -157,28 +157,18 @@ void Sih::lockstep_loop()
 			px4_lockstep_progress(_lockstep_component);
 			px4_lockstep_wait_for_components();
 
-			// Wait for the control pipeline to produce new actuator outputs.
-			// Without this, under CPU load the controllers may not run between
-			// SIH iterations, causing stale actuator data and sluggish response.
-			uint64_t wait_start_us = micros();
-			constexpr uint64_t actuator_wait_timeout_us = 10'000'000; // 10s wall time
-
-			while (!_actuator_out_sub.updated() && !should_exit()) {
-				if (micros() - wait_start_us > actuator_wait_timeout_us) {
-					PX4_WARN("SIH lockstep: timed out waiting for actuator_outputs_sim");
-					break;
-				}
-
-				usleep(100);
-			}
-
+			// The barrier drains the work queues triggered by this step. A disabled sensor or
+			// stopped controller may produce no actuator update until simulated time advances.
 			current_wall_time_us = micros();
 			sleep_time = math::max(0, rt_interval_us - (int)(current_wall_time_us - pre_compute_wall_time_us));
 		}
 
 		_achieved_speedup = 0.99f * _achieved_speedup + 0.01f * ((float)sim_interval_us / (float)(
 					    current_wall_time_us - pre_compute_wall_time_us + sleep_time));
-		usleep(sleep_time);
+
+		if (sleep_time > 0) {
+			usleep(sleep_time);
+		}
 	}
 
 	px4_lockstep_unregister_component(_lockstep_component);

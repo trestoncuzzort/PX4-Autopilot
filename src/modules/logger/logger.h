@@ -69,6 +69,8 @@ namespace px4
 namespace logger
 {
 
+class LoggerPollSubscription;
+
 static constexpr uint8_t MSG_ID_INVALID = UINT8_MAX;
 
 struct LoggerSubscription : public uORB::SubscriptionInterval {
@@ -396,7 +398,9 @@ private:
 	uORB::PublicationMulti<logger_status_s>		_logger_status_pub[(int)LogType::Count] { ORB_ID(logger_status), ORB_ID(logger_status) };
 
 	hrt_abstime					_logger_status_last {0};
-	int						_lockstep_component{-1};
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+	LoggerPollSubscription				*_lockstep_subscription {nullptr};
+#endif
 
 	size_t						_max_log_file_size {0}; ///< max log file size in bytes (0 = unlimited)
 

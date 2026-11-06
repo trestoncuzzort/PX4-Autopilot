@@ -6,6 +6,20 @@
     [
         {
             "model": "quadx",
+            "test_filter": "sih_lockstep",
+            "timeout_min": 1
+        },
+        {
+            "model": "quadx",
+            "test_filter": "sih_lockstep",
+            "timeout_min": 1,
+            "env": {
+                "PX4_PARAM_EKF2_EN": 0,
+                "PX4_PARAM_ATT_EN": 1
+            }
+        },
+        {
+            "model": "quadx",
             "test_filter": "vision_target",
             "timeout_min": 3,
             "env": {
