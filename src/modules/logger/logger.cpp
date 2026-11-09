@@ -69,6 +69,11 @@
 #include <version/version.h>
 #include <component_information/checksums.h>
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+#include <mutex>
+#include <uORB/SubscriptionCallback.hpp>
+#endif
+
 //#define DBGPRINT //write status output every few seconds
 
 static_assert(uORB::orb_untokenized_fields_max_length < sizeof(ulog_message_format_s::format) -
@@ -89,6 +94,64 @@ static_assert(uORB::orb_untokenized_fields_max_length < sizeof(ulog_message_form
 
 using namespace px4::logger;
 using namespace time_literals;
+
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+class px4::logger::LoggerPollSubscription final : public uORB::SubscriptionCallback
+{
+public:
+	explicit LoggerPollSubscription(const orb_metadata *meta) : SubscriptionCallback(meta) {}
+
+	~LoggerPollSubscription() override
+	{
+		unregisterCallback();
+		disable();
+	}
+
+	void call(unsigned generation) override
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+
+		if (!_disabled) {
+			_pending = true;
+
+			if (_component == -1) {
+				_component = px4_lockstep_register_component();
+			}
+		}
+	}
+
+	void begin_iteration()
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+		_pending = false;
+	}
+
+	void end_iteration()
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+
+		// A publication during the scan needs another iteration before releasing the clock.
+		if (!_pending) {
+			px4_lockstep_unregister_component(_component);
+			_component = -1;
+		}
+	}
+
+	void disable()
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+		_disabled = true;
+		px4_lockstep_unregister_component(_component);
+		_component = -1;
+	}
+
+private:
+	std::mutex _mutex;
+	int _component{-1};
+	bool _pending{false};
+	bool _disabled{false};
+};
+#endif
 
 
 /* This is used to schedule work for the logger (periodic scan for updated topics) */
@@ -700,13 +763,34 @@ void Logger::run()
 	hrt_abstime next_subscribe_check = 0;
 	int next_subscribe_topic_index = -1; // this is used to distribute the checks over time
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+
 	if (orb_sub_valid(polling_topic_sub)) {
-		_lockstep_component = px4_lockstep_register_component();
+		// Only pending publications participate in the barrier. Waiting for a missing sensor
+		// with a simulated-time poll timeout must not prevent the clock from advancing.
+		_lockstep_subscription = new LoggerPollSubscription(_polling_topic_meta);
+
+		if (!_lockstep_subscription || !_lockstep_subscription->registerCallback()) {
+			PX4_ERR("Failed to register logger lockstep callback");
+			request_stop();
+		}
 	}
+
+#endif
 
 	bool was_started = false;
 
 	while (!should_exit()) {
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+
+		if (_lockstep_subscription) {
+			// The preceding poll has already consumed its notification. New publications
+			// during this scan remain pending and make the next poll return immediately.
+			_lockstep_subscription->begin_iteration();
+		}
+
+#endif
+
 		// Start/stop logging (depending on logging mode, by default when arming/disarming)
 		const bool logging_started = start_stop_logging();
 
@@ -918,7 +1002,13 @@ void Logger::run()
 
 		// wait for next loop iteration...
 		if (orb_sub_valid(polling_topic_sub)) {
-			px4_lockstep_progress(_lockstep_component);
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+
+			if (_lockstep_subscription) {
+				_lockstep_subscription->end_iteration();
+			}
+
+#endif
 
 			px4_pollfd_struct_t fds[1];
 			fds[0].fd = polling_topic_sub;
@@ -947,7 +1037,10 @@ void Logger::run()
 		}
 	}
 
-	px4_lockstep_unregister_component(_lockstep_component);
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+	delete _lockstep_subscription;
+	_lockstep_subscription = nullptr;
+#endif
 
 	stop_log_file(LogType::Full);
 	stop_log_file(LogType::Mission);
@@ -1587,8 +1680,13 @@ void Logger::start_log_mavlink()
 	}
 
 	// mavlink log does not work in combination with lockstep, it leads to dead-locks
-	px4_lockstep_unregister_component(_lockstep_component);
-	_lockstep_component = -1;
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+
+	if (_lockstep_subscription) {
+		_lockstep_subscription->disable();
+	}
+
+#endif
 
 	// initialize cpu load as early as possible to get more data
 	initialize_load_output(PrintLoadReason::Preflight);

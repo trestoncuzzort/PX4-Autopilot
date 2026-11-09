@@ -422,7 +422,7 @@ void LogWriterFile::run()
 					if (written < 0) {
 						// retry once
 						PX4_ERR("write failed errno:%i (%s), retrying", errno, strerror(errno));
-						px4_usleep(10000); // 10 milliseconds
+						system_usleep(10000); // 10 milliseconds, in host time like the disk it waits for
 						written = buffer.write_to_file(read_ptr, available, call_fsync);
 					}
 
@@ -433,8 +433,8 @@ void LogWriterFile::run()
 						/* subtract bytes written from number in buffer (count -= written) */
 						buffer.mark_read(written);
 
-						if (!buffer._should_run && written == static_cast<int>(available) && !is_part) {
-							/* Stop only when all data written */
+						// The producer can append while write_to_file() runs without _mtx.
+						if (!buffer._should_run && buffer.count() == 0) {
 							pthread_mutex_unlock(&_mtx);
 							buffer.close_file();
 							pthread_mutex_lock(&_mtx);
@@ -500,6 +500,9 @@ void LogWriterFile::run()
 int LogWriterFile::write_message(LogType type, void *ptr, size_t size, uint64_t dropout_start)
 {
 	if (_need_reliable_transfer) {
+		// The waits below are for the writer thread and the disk, both in host time. Under lockstep, sleeping
+		// in simulated time here can never return: the logger holds the simulator's barrier during this
+		// iteration, so the clock cannot advance until the logger has finished.
 		int ret;
 
 		// if there's a dropout, write it first (because we might split the message)
@@ -507,7 +510,7 @@ int LogWriterFile::write_message(LogType type, void *ptr, size_t size, uint64_t 
 			while ((ret = write(type, ptr, 0, dropout_start)) == -1) {
 				unlock();
 				notify();
-				px4_usleep(3000);
+				system_usleep(3000);
 				lock();
 			}
 		}
@@ -521,7 +524,7 @@ int LogWriterFile::write_message(LogType type, void *ptr, size_t size, uint64_t 
 			while ((ret = write(type, uptr, write_size, 0)) == -1) {
 				unlock();
 				notify();
-				px4_usleep(3000);
+				system_usleep(3000);
 				lock();
 			}
 
