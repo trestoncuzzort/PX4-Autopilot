@@ -16,7 +16,8 @@ See [PX4 Simulation QuickStart](../simulation/px4_simulation_quickstart.md) for 
 SIH runs as a PX4 module that replaces real sensor and actuator hardware with a simulated physics model.
 It provides simulated IMU, GPS, barometer, magnetometer, and airspeed sensor data via uORB, and reads actuator outputs to update the vehicle state at each timestep.
 
-The simulation runs in lockstep with PX4, ensuring deterministic and reproducible results.
+In SITL, lockstep coordinates simulation time with PX4's work queues.
+Identical closed-loop results also depend on random-number state, external inputs, and scheduling; lockstep alone does not guarantee them.
 It also integrates seamlessly with ROS 2 with no additional configuration (see [ROS 2 Integration](#ros-2-integration) below).
 
 Two modes are supported:
@@ -113,17 +114,80 @@ SIH supports faster-than-realtime simulation via the `PX4_SIM_SPEED_FACTOR` envi
 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 ```
 
+The speed factor is a requested pacing limit.
 Invalid speed factors produce a warning and use normal speed (`1`).
-
-Simulated time keeps advancing when a sensor fails, a controller stops or a parameter save fails.
-The SIH test configuration includes clock-progress checks for repeated accelerometer and gyroscope failures, a stopped rate controller, and failed parameter autosaves.
-
+The achieved rate depends on the host, active modules, and logging load.
+Increasing it does not change the physics timestep or guarantee that the host reaches the requested rate.
+A requested speed below what the host can reach is held to that speed, and the `simulator_sih status` command reports the speed achieved.
 MAVLink clients run in host time, so PX4 counts its mission, FTP and command retry deadlines in host time too.
 Telemetry stream rates stay in simulated time, so at high speed a client receives far more messages per host second, up to one per stream on each pass of the MAVLink main loop.
 
+Simulated time keeps advancing when a sensor fails, a controller stops or a parameter save fails.
+
+#### Offboard-Only MAVLink Links
+
+For automated SIH tests that use the API/offboard link, start with:
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+This starts only the API/offboard MAVLink link, using its usual instance-specific ports.
+It skips the separate GCS, camera, gimbal, and Hawkeye display links and their worker threads.
+Logging remains enabled according to `SDLOG_MODE` and `SDLOG_BACKEND`.
+Leave `PX4_SIH_OFFBOARD_ONLY` unset when those additional links are needed.
+The setting applies only to SIH running as SITL.
+
+#### Single Work Queue
+
+For batch runs where thread wake-ups are expensive, `PX4_SIM_WQ_SINGLE=1` runs every work item on one thread, instead of one thread per work queue:
+
+```sh
+PX4_SIM_WQ_SINGLE=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+This removes the hand-offs between queue threads, so simulated time can pass faster.
+It also runs work one item at a time that a flight controller would run by priority, and a work item that blocks holds up all the others.
+It does not model flight hardware scheduling, so do not use it to evaluate timing.
+The setting applies only to lockstep simulation and is off unless the value is exactly `1`.
+
+The two batch settings can be combined:
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
+```
+
+To check this configuration with the [MAVSDK integration tests](../test_and_ci/integration_testing_mavsdk.md):
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 test/mavsdk_tests/mavsdk_test_runner.py test/mavsdk_tests/configs/sih-sitl.json --speed-factor 10 --build-dir build/px4_sitl_sih
+```
+
+#### Simulator Thread (Experimental)
+
+`PX4_SIM_WQ_INLINE=1` goes further than the single work queue: the simulator thread runs timers and every work item itself on each step, which removes the thread wake-ups between them.
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_INLINE=1 PX4_SIM_SPEED_FACTOR=100 make px4_sitl_sih sihsim_quadx
+```
+
+The setting implies the single work queue, with the same limits: it does not model flight hardware scheduling, so do not use it to evaluate timing.
+It applies only to SIH running as SITL and is off unless the value is exactly `1`.
+
+#### Running Several Simulations
+
+Run several simulations at once as a normal user, not as root.
+As root every PX4 thread gets real-time scheduling (`SCHED_FIFO`).
+With many instances those threads starve the startup scripts and other programs, startup can take over a minute, and total throughput is lower.
+With a single instance it makes little difference.
+This does not apply in a container without `CAP_SYS_NICE`.
+
+Holding an instance to one CPU slows it down, so leave CPU placement to the operating system.
+Each instance needs about 10 MB of memory, most of it shared with the other instances.
+
 #### Wind Simulation
 
-SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
+SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_N) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
 
 #### Set Custom Takeoff Location
 

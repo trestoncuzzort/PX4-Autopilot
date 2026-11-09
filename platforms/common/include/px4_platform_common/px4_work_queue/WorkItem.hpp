@@ -106,6 +106,9 @@ protected:
 	}
 
 	friend void WorkQueue::Run();
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+	friend void WorkQueue::RunPending();
+#endif
 	virtual void Run() = 0;
 
 	/**
