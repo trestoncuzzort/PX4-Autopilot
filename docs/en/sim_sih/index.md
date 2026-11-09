@@ -159,6 +159,28 @@ To check this configuration with the [MAVSDK integration tests](../test_and_ci/i
 PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_SINGLE=1 test/mavsdk_tests/mavsdk_test_runner.py test/mavsdk_tests/configs/sih-sitl.json --speed-factor 10 --build-dir build/px4_sitl_sih
 ```
 
+#### Simulator Thread (Experimental)
+
+`PX4_SIM_WQ_INLINE=1` goes further than the single work queue: the simulator thread runs timers and every work item itself on each step, which removes the thread wake-ups between them.
+
+```sh
+PX4_SIH_OFFBOARD_ONLY=1 PX4_SIM_WQ_INLINE=1 PX4_SIM_SPEED_FACTOR=100 make px4_sitl_sih sihsim_quadx
+```
+
+The setting implies the single work queue, with the same limits: it does not model flight hardware scheduling, so do not use it to evaluate timing.
+It applies only to SIH running as SITL and is off unless the value is exactly `1`.
+
+#### Running Several Simulations
+
+Run several simulations at once as a normal user, not as root.
+As root every PX4 thread gets real-time scheduling (`SCHED_FIFO`).
+With many instances those threads starve the startup scripts and other programs, startup can take over a minute, and total throughput is lower.
+With a single instance it makes little difference.
+This does not apply in a container without `CAP_SYS_NICE`.
+
+Holding an instance to one CPU slows it down, so leave CPU placement to the operating system.
+Each instance needs about 10 MB of memory, most of it shared with the other instances.
+
 #### Wind Simulation
 
 SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_N) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
