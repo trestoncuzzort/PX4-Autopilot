@@ -83,12 +83,30 @@ DatamanClient::~DatamanClient()
 	}
 }
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+// The dataman server answers in host time, however fast simulated time runs. At a few hundred times
+// real time a simulated second is a few milliseconds, which its thread can spend waiting for a CPU.
+static hrt_abstime sync_time()
+{
+	timespec ts {};
+	system_clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts_to_abstime(&ts);
+}
+#else
+static hrt_abstime sync_time()
+{
+	return hrt_absolute_time();
+}
+#endif
+
 bool DatamanClient::syncHandler(const dataman_request_s &request, dataman_response_s &response,
 				const hrt_abstime &start_time, hrt_abstime timeout)
 {
 	bool response_received = false;
 	int32_t ret = 0;
-	hrt_abstime time_elapsed = hrt_elapsed_time(&start_time);
+	// start_time is when the caller made the request, a moment ago. Without lockstep this is start_time itself.
+	const hrt_abstime sync_start = sync_time() - hrt_elapsed_time(&start_time);
+	hrt_abstime time_elapsed = sync_time() - sync_start;
 	perf_begin(_sync_perf);
 	clearPendingResponse();
 
@@ -136,7 +154,7 @@ bool DatamanClient::syncHandler(const dataman_request_s &request, dataman_respon
 			}
 		}
 
-		time_elapsed = hrt_elapsed_time(&start_time);
+		time_elapsed = sync_time() - sync_start;
 	}
 
 	perf_end(_sync_perf);
