@@ -113,6 +113,9 @@ SIH supports faster-than-realtime simulation via the `PX4_SIM_SPEED_FACTOR` envi
 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 ```
 
+MAVLink clients run in host time, so PX4 counts its mission, FTP and command retry deadlines in host time too.
+Telemetry stream rates stay in simulated time, so at high speed a client receives far more messages per host second, up to one per stream on each pass of the MAVLink main loop.
+
 #### Wind Simulation
 
 SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
