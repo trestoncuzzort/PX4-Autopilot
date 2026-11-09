@@ -63,7 +63,6 @@ ModuleBase::Descriptor Sih::desc{task_spawn, custom_command, print_usage};
 Sih::Sih() :
 	ModuleParams(nullptr)
 {
-	srand(1234); // initialize the random seed once before calling math::generate_wgn()
 }
 
 Sih::~Sih()
@@ -411,7 +410,7 @@ void Sih::parameters_updated()
 
 	_T_TAU = _sih_thrust_tau.get();
 
-	_v_wind_N = Vector3f(_sih_wind_n.get(), _sih_wind_e.get(), 0.f);
+	_v_wind_N = Vector3f(_sih_wind_n.get(), _sih_wind_e.get(), _sih_wind_d.get());
 }
 
 void Sih::read_motors(const float dt)
@@ -777,6 +776,13 @@ void Sih::equations_of_motion(const float dt)
 	const Vector3f w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
 	_w_B = constrain(_w_B + w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
 
+	// Turbulence on top of the steady wind: a first-order Gauss-Markov process on each axis.
+	if (_sih_wind_turb.get() > 0.f) {
+		const float decay = expf(-dt / fmaxf(_sih_wind_tc.get(), 0.1f));
+		const float drive = sqrtf(1.f - decay * decay);
+		_wind_turbulence_state = _wind_turbulence_state * decay + _wind_noise.vector(drive, drive, drive);
+	}
+
 	ecefToNed();
 
 	_lpos_ref.project(_lla.latitude_deg(), _lla.longitude_deg(), _lpos(0), _lpos(1));
@@ -794,6 +800,10 @@ void Sih::ecefToNed()
 	_v_N = C_SE * _v_E;
 	_v_apparent_N = _v_N + _v_wind_N;
 
+	if (_sih_wind_turb.get() > 0.f) {
+		_v_apparent_N += _wind_turbulence_state * _sih_wind_turb.get();
+	}
+
 	_q = Quatf(C_SE) * _q_E;
 	_q.normalize();
 }
@@ -810,20 +820,39 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	Vector3f gyro_noise;
 
 	if (false && _T_B.longerThan(FLT_EPSILON)) { // too much noise at least for the low update rate O.O
-		accel_noise = math::noiseGauss3f(0.5f, 1.7f, 1.4f);
-		gyro_noise = math::noiseGauss3f(0.14f, 0.07f, 0.03f);
+		accel_noise = _accel_noise.vector(0.5f, 1.7f, 1.4f) * fmaxf(_sih_acc_noise.get(), 0.f);
+		gyro_noise = _gyro_noise.vector(0.14f, 0.07f, 0.03f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 
 	} else {
 		// Lower noise when not armed
-		accel_noise = math::noiseGauss3f(0.1f, 0.1f, 0.1f);
-		gyro_noise = math::noiseGauss3f(0.01f, 0.01f, 0.01f);
+		accel_noise = _accel_noise.vector(0.1f, 0.1f, 0.1f) * fmaxf(_sih_acc_noise.get(), 0.f);
+		gyro_noise = _gyro_noise.vector(0.01f, 0.01f, 0.01f) * fmaxf(_sih_gyro_noise.get(), 0.f);
 	}
 
+	// First-order Gauss-Markov bias with exact discretisation, so its size does not depend on the step.
+	const float accel_bias_std = fmaxf(_sih_acc_bias.get(), 0.f);
+	const float gyro_bias_std = fmaxf(_sih_gyro_bias.get(), 0.f);
+
+	if ((accel_bias_std > 0.f || gyro_bias_std > 0.f) && (_imu_bias_time_us != 0)) {
+		const float decay = expf(-1e-6f * (float)(time_now_us - _imu_bias_time_us) / fmaxf(_sih_imu_bias_tc.get(), 1.f));
+		const float drive = sqrtf(1.f - decay * decay);
+
+		if (accel_bias_std > 0.f) {
+			_accel_bias_state = _accel_bias_state * decay + _accel_bias_noise.vector(drive, drive, drive);
+		}
+
+		if (gyro_bias_std > 0.f) {
+			_gyro_bias_state = _gyro_bias_state * decay + _gyro_bias_noise.vector(drive, drive, drive);
+		}
+	}
+
+	_imu_bias_time_us = time_now_us;
+
 	Vector3f specific_force_B = R_E2B * _specific_force_E;
-	Vector3f accel = specific_force_B + accel_noise;
+	Vector3f accel = specific_force_B + accel_noise + _accel_bias_state * accel_bias_std;
 
 	const Vector3f earth_spin_rate_B = R_E2B * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE);
-	Vector3f gyro = _w_B + earth_spin_rate_B + gyro_noise;
+	Vector3f gyro = _w_B + earth_spin_rate_B + gyro_noise + _gyro_bias_state * gyro_bias_std;
 
 	// update IMU every iteration
 	if (!_accel_blocked) {
@@ -852,7 +881,7 @@ void Sih::send_airspeed(const hrt_abstime &time_now_us)
 
 	const Vector3f v_apparent_B = _q.rotateVectorInverse(_v_apparent_N);
 	const float v_pitot = (_vehicle == VehicleType::TailsitterVTOL) ? -v_apparent_B(2) : v_apparent_B(0);
-	airspeed.true_airspeed_m_s = fmaxf(0.1f, v_pitot + math::generate_wgn() * 0.2f);
+	airspeed.true_airspeed_m_s = fmaxf(0.1f, v_pitot + _airspeed_noise.sample() * fmaxf(_sih_arsp_noise.get(), 0.f));
 	airspeed.indicated_airspeed_m_s = airspeed.true_airspeed_m_s * sqrtf(_wing_l.get_rho() / RHO);
 	airspeed.confidence = 0.7f;
 	airspeed.timestamp = hrt_absolute_time();
@@ -905,7 +934,7 @@ void Sih::send_ranging_beacon(const hrt_abstime &time_now_us)
 		const double true_range_m = delta_ecef.norm();
 
 		const float noise_std = _sih_ranging_beacon_noise.get();
-		const float noise_m = (noise_std > 0.f) ? math::generate_wgn() * noise_std : 0.f;
+		const float noise_m = _beacon_noise.sample() * fmaxf(noise_std, 0.f);
 		const double measured_range_m = math::max(0.0, true_range_m + static_cast<double>(noise_m));
 
 		ranging_beacon_s msg{};

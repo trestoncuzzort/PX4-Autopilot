@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <mathlib/math/WhiteGaussianNoise.hpp>
+#include <modules/simulation/SensorNoise.hpp>
 #include <lib/failure_injection/FailureInjection.hpp>
 #include <lib/perf/perf_counter.h>
 #include <px4_platform_common/defines.h>
@@ -56,6 +56,8 @@ using namespace time_literals;
 
 class SensorGpsSim : public ModuleBase, public ModuleParams, public px4::ScheduledWorkItem
 {
+	friend class SensorGpsSimTest;
+
 public:
 	static Descriptor desc;
 
@@ -84,6 +86,9 @@ private:
 	bool updateRtcmCorrections();
 
 	void publishWithFailures(int instance, sensor_gnss_s gnss, uORB::PublicationMulti<sensor_gnss_s> &pub);
+
+	simulation::SensorNoise _position_noise{simulation::NoiseStream::GpsPosition};
+	simulation::SensorNoise _velocity_noise{simulation::NoiseStream::GpsVelocity};
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _vehicle_global_position_sub{ORB_ID(vehicle_global_position_groundtruth)};
@@ -119,6 +124,8 @@ private:
 	static constexpr float _vel_markov_time{0.54f};
 
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SIM_GPS_P_NOISE>) _sim_gps_p_noise,
+		(ParamFloat<px4::params::SIM_GPS_V_NOISE>) _sim_gps_v_noise,
 		(ParamInt<px4::params::SIM_GPS_USED>)      _sim_gps_used,
 		(ParamFloat<px4::params::SENS_GNSS1_OFFX>) _param_gnss1_offx,
 		(ParamFloat<px4::params::SENS_GNSS1_OFFY>) _param_gnss1_offy

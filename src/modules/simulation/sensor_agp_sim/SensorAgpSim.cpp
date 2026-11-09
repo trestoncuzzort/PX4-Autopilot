@@ -98,11 +98,11 @@ void SensorAgpSim::Run()
 			_position_bias.zero();
 		}
 
-		const double latitude = _measured_lla.latitude_deg() + math::degrees((double)math::generate_wgn() * 2.0 /
+		const double latitude = _measured_lla.latitude_deg() + math::degrees((double)(_noise.sample() * fmaxf(_sim_agp_n_h.get(), 0.f)) /
 					CONSTANTS_RADIUS_OF_EARTH);
-		const double longitude = _measured_lla.longitude_deg() + math::degrees((double)math::generate_wgn() * 2.0 /
+		const double longitude = _measured_lla.longitude_deg() + math::degrees((double)(_noise.sample() * fmaxf(_sim_agp_n_h.get(), 0.f)) /
 					 CONSTANTS_RADIUS_OF_EARTH);
-		const double altitude = (double)(_measured_lla.altitude() + (math::generate_wgn() * 0.5f));
+		const double altitude = (double)(_measured_lla.altitude() + (_noise.sample() * fmaxf(_sim_agp_n_v.get(), 0.f)));
 
 		aux_global_position_s sample{};
 

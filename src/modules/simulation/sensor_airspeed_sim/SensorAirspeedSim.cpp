@@ -110,7 +110,7 @@ void SensorAirspeedSim::Run()
 
 			if (!_airspeed_stuck) {
 				// calculate differential pressure + noise in hPa
-				const float diff_pressure_noise = (float)math::generate_wgn() * 0.01f;
+				const float diff_pressure_noise = _noise.sample() * fmaxf(_sim_arsp_noise.get(), 0.f);
 				float diff_pressure = sign(body_velocity(0)) * 0.005f * air_density  * body_velocity(0) * body_velocity(
 							      0) + diff_pressure_noise;
 

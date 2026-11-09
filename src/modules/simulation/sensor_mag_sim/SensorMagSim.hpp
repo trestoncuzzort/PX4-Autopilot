@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <mathlib/math/WhiteGaussianNoise.hpp>
+#include <modules/simulation/SensorNoise.hpp>
 #include <lib/drivers/magnetometer/PX4Magnetometer.hpp>
 #include <lib/failure_injection/FailureInjection.hpp>
 #include <lib/perf/perf_counter.h>
@@ -74,6 +74,8 @@ private:
 	void Run() override;
 	void updateFailureConfig();
 
+	simulation::SensorNoise _noise{simulation::NoiseStream::Magnetometer};
+
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude_groundtruth)};
 	uORB::Subscription _vehicle_global_position_sub{ORB_ID(vehicle_global_position_groundtruth)};
@@ -93,6 +95,7 @@ private:
 	perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
 
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SIM_MAG_NOISE>) _sim_mag_noise,
 		(ParamFloat<px4::params::SIM_MAG_OFFSET_X>) _sim_mag_offset_x,
 		(ParamFloat<px4::params::SIM_MAG_OFFSET_Y>) _sim_mag_offset_y,
 		(ParamFloat<px4::params::SIM_MAG_OFFSET_Z>) _sim_mag_offset_z

@@ -42,6 +42,94 @@
 #include <cmath>
 #include <cstdlib>
 
+TEST(GaussianNoiseTest, StreamsDoNotShareState)
+{
+	math::GaussianNoise reference(1234, 1);
+	math::GaussianNoise actual(1234, 1);
+	math::GaussianNoise other(1234, 2);
+
+	for (int i = 0; i < 1000; ++i) {
+		other.sample();
+		other.sample();
+		math::generate_wgn();
+		EXPECT_FLOAT_EQ(actual.sample(), reference.sample());
+	}
+}
+
+TEST(GaussianNoiseTest, ResetDiscardsCachedSample)
+{
+	for (const uint32_t seed : {0u, 1u, 1234u, UINT32_MAX}) {
+		math::GaussianNoise reference(seed, 3);
+		math::GaussianNoise actual(42, 4);
+		actual.sample();
+		actual.reset(seed, 3);
+
+		for (int i = 0; i < 100; ++i) {
+			EXPECT_FLOAT_EQ(actual.sample(), reference.sample());
+		}
+	}
+}
+
+TEST(GaussianNoiseTest, ArrayBoundariesDoNotChangeSequence)
+{
+	math::GaussianNoise scalar(42, 9);
+	math::GaussianNoise batch(42, 9);
+	float samples[7];
+	batch.fill(nullptr, 0);
+
+	for (int i = 0; i < 100; ++i) {
+		batch.fill(samples, 7);
+
+		for (float sample : samples) {
+			EXPECT_FLOAT_EQ(sample, scalar.sample());
+		}
+	}
+}
+
+TEST(GaussianNoiseTest, SeedsAndStreamsAreUncorrelated)
+{
+	math::GaussianNoise generators[] {math::GaussianNoise(1234, 1), math::GaussianNoise(1234, 2), math::GaussianNoise(1235, 1)};
+	constexpr int n = 200000;
+	double sum[3] {};
+	double squared[3] {};
+	double cross[3] {};
+
+	for (int i = 0; i < n; ++i) {
+		float samples[3];
+
+		for (int j = 0; j < 3; ++j) {
+			samples[j] = generators[j].sample();
+			ASSERT_TRUE(std::isfinite(samples[j]));
+			sum[j] += double(samples[j]);
+			squared[j] += double(samples[j]) * double(samples[j]);
+		}
+
+		cross[0] += double(samples[0]) * double(samples[1]);
+		cross[1] += double(samples[0]) * double(samples[2]);
+		cross[2] += double(samples[1]) * double(samples[2]);
+	}
+
+	for (int j = 0; j < 3; ++j) {
+		EXPECT_NEAR(sum[j] / n, 0.0, 0.02);
+		EXPECT_NEAR(squared[j] / n, 1.0, 0.02);
+		EXPECT_NEAR(cross[j] / n, 0.0, 0.02);
+	}
+}
+
+TEST(GaussianNoiseTest, VectorUsesRequestedStandardDeviations)
+{
+	math::GaussianNoise reference(7);
+	math::GaussianNoise scaled(7);
+
+	for (int i = 0; i < 100; ++i) {
+		const auto value = scaled.vector(0.f, 0.5f, 2.f);
+		reference.sample();
+		EXPECT_FLOAT_EQ(value(0), 0.f);
+		EXPECT_FLOAT_EQ(value(1), reference.sample() * 0.5f);
+		EXPECT_FLOAT_EQ(value(2), reference.sample() * 2.f);
+	}
+}
+
 TEST(WhiteGaussianNoiseTest, unitNormalStatistics)
 {
 	srand(1234);

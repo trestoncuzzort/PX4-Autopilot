@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <mathlib/math/WhiteGaussianNoise.hpp>
+#include <modules/simulation/SensorNoise.hpp>
 #include <lib/failure_injection/FailureInjection.hpp>
 #include <lib/perf/perf_counter.h>
 #include <math.h>
@@ -85,6 +85,8 @@ public:
 private:
 	void Run() override;
 
+	simulation::SensorNoise _noise{simulation::NoiseStream::DifferentialPressure};
+
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
 	uORB::Subscription _vehicle_global_position_sub{ORB_ID(vehicle_global_position_groundtruth)};
@@ -100,4 +102,7 @@ private:
 	float _last_differential_pressure_pa{0.f};
 
 	perf_counter_t _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
+	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SIM_ARSP_NOISE>) _sim_arsp_noise
+	)
 };
