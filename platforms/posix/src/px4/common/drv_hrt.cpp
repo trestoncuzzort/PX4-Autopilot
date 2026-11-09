@@ -546,7 +546,10 @@ int px4_pthread_cond_timedwait(pthread_cond_t *cond,
 void px4_lockstep_run_timers()
 {
 	if (!_hrt_run_by_time_master) {
+		// hrt_call_reschedule() reads this under the lock, on whichever thread adds a callout
+		hrt_lock();
 		_hrt_run_by_time_master = true;
+		hrt_unlock();
 		hrt_work_cancel(&_hrt_work);
 	}
 

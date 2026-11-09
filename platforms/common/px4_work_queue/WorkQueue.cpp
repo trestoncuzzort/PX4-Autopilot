@@ -249,15 +249,17 @@ void WorkQueue::Run()
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 void WorkQueue::HandOverToTimeMaster()
 {
+	work_lock();
 	_run_by_time_master.store(true);
-	SignalWorkerThread();
 
-	// The worker may be inside a work item right now. Nothing else can start one until the time master does.
+	// The worker may be inside a work item right now. It looks at _run_by_time_master under this lock before
+	// it starts another one, so once it is seen idle here nothing runs until the time master runs it.
 	while (_running_item.load() != nullptr) {
+		work_unlock();
 		system_usleep(50);
+		work_lock();
 	}
 
-	work_lock();
 	px4_lockstep_unregister_component(_lockstep_component);
 	_lockstep_component = -1;
 	_runner_tid = pthread_self();
