@@ -39,6 +39,7 @@
  */
 
 #include "mavlink_command_sender.h"
+#include "mavlink_link_time.h"
 #include <px4_platform_common/log.h>
 #include <pthread.h>
 
@@ -127,7 +128,7 @@ int MavlinkCommandSender::handle_vehicle_command(const vehicle_command_s &comman
 		new_item.target_system = command.target_system;
 		new_item.timestamp_us = command.timestamp;
 		new_item.num_sent_per_channel[channel] = 0;
-		new_item.last_time_sent_us = hrt_absolute_time();
+		new_item.last_time_sent_us = mavlink_link_time();
 		_commands.put(new_item);
 		_num_commands.store(_commands.count());
 	}
@@ -181,7 +182,7 @@ void MavlinkCommandSender::check_timeout(mavlink_channel_t channel)
 	_commands.reset_to_start();
 
 	while (command_item_s *item = _commands.get_next()) {
-		if (hrt_elapsed_time(&item->last_time_sent_us) <= TIMEOUT_US) {
+		if ((mavlink_link_time() - item->last_time_sent_us) <= TIMEOUT_US) {
 			// We keep waiting for the timeout.
 			continue;
 		}
@@ -255,7 +256,7 @@ void MavlinkCommandSender::check_timeout(mavlink_channel_t channel)
 			item->command.confirmation = ++item->num_sent_per_channel[channel];
 			mavlink_msg_send_struct_target(channel, COMMAND_LONG, &item->command, item->target_system);
 			// Therefore, we are the ones setting the timestamp of this retry round.
-			item->last_time_sent_us = hrt_absolute_time();
+			item->last_time_sent_us = mavlink_link_time();
 
 			CMD_DEBUG("command %" PRIu16 " sent (first, retries: %" PRId8 "/%" PRId8 ", channel: %d)",
 				  item->command.command,
