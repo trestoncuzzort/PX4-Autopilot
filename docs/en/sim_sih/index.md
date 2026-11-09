@@ -113,6 +113,11 @@ SIH supports faster-than-realtime simulation via the `PX4_SIM_SPEED_FACTOR` envi
 PX4_SIM_SPEED_FACTOR=10 make px4_sitl_sih sihsim_quadx
 ```
 
+Invalid speed factors produce a warning and use normal speed (`1`).
+
+Simulated time keeps advancing when a sensor fails, a controller stops or a parameter save fails.
+The SIH test configuration includes clock-progress checks for repeated accelerometer and gyroscope failures, a stopped rate controller, and failed parameter autosaves.
+
 #### Wind Simulation
 
 SIH supports setting a wind velocity with the PX4 parameters [`SIH_WIND_N`](../advanced_config/parameter_reference.md#SIH_WIND_E) and [`SIH_WIND_E`](../advanced_config/parameter_reference.md#SIH_WIND_E) [m/s]. The parameters can also be changed during flight to simulate changing wind.
