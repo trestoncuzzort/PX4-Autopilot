@@ -123,6 +123,7 @@ MAVLink clients run in host time, so PX4 counts its mission, FTP and command ret
 Telemetry stream rates stay in simulated time, so at high speed a client receives far more messages per host second, up to one per stream on each pass of the MAVLink main loop.
 
 Simulated time keeps advancing when a sensor fails, a controller stops or a parameter save fails.
+The dataman client's request timeouts count host time, so a fast simulation on a busy host does not lose its geofence or mission at boot.
 The SIH test configuration includes clock-progress checks for repeated accelerometer and gyroscope failures, a stopped rate controller, and failed parameter autosaves.
 
 #### Offboard-Only MAVLink Links
